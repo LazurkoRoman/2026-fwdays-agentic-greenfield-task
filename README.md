@@ -136,9 +136,22 @@ tests/test_geometry.py geometry and regression tests
 
 ## Submission Notes
 
-For the assignment submission, the most relevant evidence in this repository is:
+Assignment evidence:
 
-- working product with CLI and web UI,
-- explicit agentic workflow artifacts,
-- independent verification via tests,
-- maker/checker separation captured through documented review flow.
+- Author: Roman Lazurko.
+- Pull request: https://github.com/koldovsky/2026-fwdays-agentic-greenfield-task/pull/46
+- Demo video (1-2 min): MISSING (no public link added in this repository yet).
+
+Agentic practices actually used:
+
+- Iterative loop per slice: context -> requirements -> specification -> tests -> implementation -> verification -> review -> summary.
+- Persistent context in AGENTS.md with technical traps and verification commands.
+- Maker != checker: implementation in code, then independent checks via pytest, CI workflow, and PR review tooling.
+- Specs/tests/evals: analytical geometry tests plus explicit regression tests for TopLoc_Location behavior.
+- Verification before merge: local pytest, smoke CLI run, and CI workflow execution.
+- Tools/MCP usage: structured file edits, terminal validation, browser checks, and Python/MCP execution for reproducible diagnostics.
+
+Student vs agent responsibilities:
+
+- Student: selected architecture, defined acceptance criteria, reviewed outputs, and decided which changes were accepted.
+- Agent: generated/refined implementation, added tests and docs updates, and ran validation commands under the defined workflow.

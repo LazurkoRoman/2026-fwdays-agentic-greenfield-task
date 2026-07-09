@@ -39,6 +39,23 @@ def box_cylinder_step(tmp_path_factory):
     return str(path)
 
 
+@pytest.fixture(scope="module")
+def nested_subassembly_step(tmp_path_factory):
+    """Assembly fixture with nested instance locations (root -> subassembly -> part)."""
+    inner_cyl = cq.Workplane("XY").cylinder(10, 2)
+
+    sub_assy = cq.Assembly(name="SubAssembly")
+    sub_assy.add(inner_cyl, name="InnerCylinder", loc=cq.Location(cq.Vector(5, 0, 0)))
+
+    root_assy = cq.Assembly(name="RootAssembly")
+    root_assy.add(sub_assy, name="SubAssemblyInstance", loc=cq.Location(cq.Vector(40, 0, 0)))
+
+    out_dir = tmp_path_factory.mktemp("nested_stp")
+    path = out_dir / "nested_subassembly.stp"
+    root_assy.save(str(path), exportType="STEP")
+    return str(path)
+
+
 def test_parses_correct_number_of_children(box_cylinder_step):
     """Parser should keep assembly hierarchy and expose two direct children."""
     tree = parse_step(box_cylinder_step)
@@ -78,6 +95,16 @@ def test_cylinder_center_of_mass_reflects_assembly_location(box_cylinder_step):
     assert cyl_node.com[0] == pytest.approx(20.0, abs=1e-3)
     assert cyl_node.com[1] == pytest.approx(0.0, abs=1e-3)
     assert cyl_node.com[2] == pytest.approx(0.0, abs=1e-3)
+
+
+def test_nested_subassembly_center_of_mass_reflects_instance_location(nested_subassembly_step):
+    """Nested subassembly COM should include parent instance transform."""
+    tree = parse_step(nested_subassembly_step)
+
+    sub_node = next(c for c in tree.children if c.name.startswith("SubAssembly"))
+
+    # Subassembly instance x=40 with inner part local x=5 -> global COM x=45.
+    assert sub_node.com[0] == pytest.approx(45.0, abs=1e-3)
 
 
 def test_assembly_volume_is_sum_of_children(box_cylinder_step):

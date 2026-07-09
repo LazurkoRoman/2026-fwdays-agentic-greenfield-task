@@ -246,22 +246,32 @@ def _walk(shape_tool, label: TDF_Label, seen_names: dict,
             child_node = _walk(shape_tool, ref_label, seen_names,
                                shape_label_for_geometry=comp_label, stl_dir=stl_dir)
             node.children.append(child_node)
-        total_vol = sum(c.volume for c in node.children if c.volume)
-        if total_vol:
-            wx = sum((c.com[0] * c.volume) for c in node.children if c.volume) / total_vol
-            wy = sum((c.com[1] * c.volume) for c in node.children if c.volume) / total_vol
-            wz = sum((c.com[2] * c.volume) for c in node.children if c.volume) / total_vol
-            node.volume = round(total_vol, 6)
-            node.com = (round(wx, 4), round(wy, 4), round(wz, 4))
-        if stl_dir:
-            assy_shape = shape_tool.GetShape_s(geom_label)
-            if assy_shape is not None and not assy_shape.IsNull():
-                asset_id = uuid.uuid4().hex
-                stl_path = os.path.join(stl_dir, asset_id + ".stl")
-                png_path = os.path.join(stl_dir, asset_id + ".png")
-                if _export_stl(assy_shape, stl_path):
-                    _export_png_from_stl(stl_path, png_path, title=display_name)
-                    node.stl_id = asset_id + ".stl"
+        assy_shape = shape_tool.GetShape_s(geom_label)
+
+        # Prefer instance-shape properties for assemblies so nested instance
+        # TopLoc_Location is preserved; fallback to child aggregation only when
+        # the shape is unavailable.
+        if assy_shape is not None and not assy_shape.IsNull():
+            volume, com, bbox = _shape_props(assy_shape)
+            node.volume = volume
+            node.com = com
+            node.bbox = bbox
+        else:
+            total_vol = sum(c.volume for c in node.children if c.volume)
+            if total_vol:
+                wx = sum((c.com[0] * c.volume) for c in node.children if c.volume) / total_vol
+                wy = sum((c.com[1] * c.volume) for c in node.children if c.volume) / total_vol
+                wz = sum((c.com[2] * c.volume) for c in node.children if c.volume) / total_vol
+                node.volume = round(total_vol, 6)
+                node.com = (round(wx, 4), round(wy, 4), round(wz, 4))
+
+        if stl_dir and assy_shape is not None and not assy_shape.IsNull():
+            asset_id = uuid.uuid4().hex
+            stl_path = os.path.join(stl_dir, asset_id + ".stl")
+            png_path = os.path.join(stl_dir, asset_id + ".png")
+            if _export_stl(assy_shape, stl_path):
+                _export_png_from_stl(stl_path, png_path, title=display_name)
+                node.stl_id = asset_id + ".stl"
     else:
         shape = shape_tool.GetShape_s(geom_label)
         if shape is not None and not shape.IsNull():

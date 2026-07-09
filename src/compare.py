@@ -110,12 +110,16 @@ def compare_nodes(
         for name in all_names
     ]
 
+    same_node_type = node_a.is_assembly == node_b.is_assembly
+    has_required_measurements = vol_delta is not None and com_delta is not None
     within_tolerance = (
-        (vol_delta is None or vol_delta <= volume_tol_pct)
-        and (com_delta is None or com_delta <= com_tol_mm)
+        vol_delta is not None
+        and vol_delta <= volume_tol_pct
+        and com_delta is not None
+        and com_delta <= com_tol_mm
     )
     any_child_changed = any(c.status != "match" for c in diff_children)
-    status = "match" if (within_tolerance and not any_child_changed) else "changed"
+    status = "match" if (same_node_type and has_required_measurements and within_tolerance and not any_child_changed) else "changed"
 
     return DiffNode(
         name=node_a.name,

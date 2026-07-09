@@ -13,6 +13,7 @@ report.py — рендерить дерева Node і DiffNode у самодос
 from __future__ import annotations
 
 import html
+import json
 from urllib.parse import quote
 from typing import Optional
 
@@ -373,7 +374,7 @@ function fitCamera(cam, ctrl, m, scale) {
 
 function initViewer() {
     if (typeof THREE === 'undefined' || !THREE.STLLoader || !THREE.OrbitControls) {
-        document.getElementById('viewer-msg').textContent = '3D двигун не завантажився в браузері';
+        document.getElementById('viewer-msg').textContent = (window.I18N && window.I18N.viewer_engine_missing) || '3D engine failed to load';
         return;
     }
     var canvas = document.getElementById('viewer-canvas');
@@ -412,7 +413,7 @@ function initViewer() {
 window.selectElementFrom = function (el) {
     var url = el.getAttribute('data-stl-url');
     var pngUrl = el.getAttribute('data-png-url');
-    var title = el.getAttribute('data-stl-title') || 'Елемент';
+    var title = el.getAttribute('data-stl-title') || ((window.I18N && window.I18N.preview_title) || 'Element');
     if (!url) return;
 
     document.querySelectorAll('.name.active-node').forEach(function (n) { n.classList.remove('active-node'); });
@@ -425,7 +426,7 @@ window.selectElementFrom = function (el) {
     document.getElementById('viewer-meta-url').textContent = pngUrl || url;
     document.getElementById('viewer-title').textContent = title;
     document.getElementById('viewer-msg').style.display = 'flex';
-    document.getElementById('viewer-msg').innerHTML = '<span class="spinner"></span>Завантаження STL...';
+    document.getElementById('viewer-msg').innerHTML = '<span class="spinner"></span>' + (((window.I18N && window.I18N.viewer_loading) || 'Loading STL...'));
     document.getElementById('viewer-err').style.display = 'none';
 
     if (!renderer) initViewer();
@@ -467,21 +468,21 @@ window.clearViewer = function () {
         mesh = null;
     }
     document.querySelectorAll('.name.active-node').forEach(function (n) { n.classList.remove('active-node'); });
-    document.getElementById('viewer-title').textContent = 'Поточний елемент: не вибрано';
+    document.getElementById('viewer-title').textContent = (window.I18N && window.I18N.viewer_title_none) || 'Current element: none';
         document.getElementById('viewer-thumb').src = document.getElementById('viewer-thumb').getAttribute('data-fallback');
     document.getElementById('viewer-meta-name').textContent = '—';
     document.getElementById('viewer-meta-url').textContent = '—';
     document.getElementById('viewer-err').style.display = 'none';
     document.getElementById('viewer-msg').style.display = 'flex';
-    document.getElementById('viewer-msg').textContent = 'Оберіть елемент у дереві (зліва або справа), щоб відкрити STL.';
+    document.getElementById('viewer-msg').textContent = (window.I18N && window.I18N.viewer_choose) || 'Select an element in the tree to open STL.';
 };
 
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof THREE === 'undefined' || !THREE.STLLoader || !THREE.OrbitControls) {
-        document.getElementById('viewer-msg').textContent = 'Браузер не підтримує 3D-в’юшку або CDN недоступний';
+        document.getElementById('viewer-msg').textContent = (window.I18N && window.I18N.viewer_browser_unsupported) || 'Browser does not support 3D viewer or CDN is unavailable';
         return;
     }
-    document.getElementById('viewer-thumb').src = '{empty_preview}';
+    document.getElementById('viewer-thumb').src = (window.I18N && window.I18N.empty_preview) || document.getElementById('viewer-thumb').getAttribute('data-fallback');
     initViewer();
 });
 """
@@ -507,8 +508,10 @@ def _render_plain_node(node, depth: int, ctr: list, stl_base_url: str = None, la
     name_esc = html.escape(node.name)
 
     if stl_base_url and node.stl_id:
-        stl_url = html.escape(stl_base_url + node.stl_id)
-        png_url = html.escape(stl_url[:-4] + ".png")
+        stl_url_raw = stl_base_url + node.stl_id
+        png_url_raw = stl_url_raw[:-4] + ".png"
+        stl_url = html.escape(stl_url_raw)
+        png_url = html.escape(png_url_raw)
         thumb_html = (
             f'<img class="thumb stl-thumb" src="{png_url}" '
             f'data-stl-url="{stl_url}" data-png-url="{png_url}" '
@@ -599,15 +602,28 @@ def _count(node: DiffNode, acc: dict = None) -> dict:
 def render_report(root: DiffNode, title_a: str, title_b: str,
                                     tree_a=None, tree_b=None,
                                     stl_base_url: str = None,
-                                    lang: str = "uk") -> str:
+                                    lang: str = "uk",
+                                    lang_switch_url_template: str = "/?lang={code}",
+                                    back_url: str = None) -> str:
     """Build a full localized HTML report with A/B trees, diff panel, and 3D viewer."""
     lang = normalize_lang(lang)
     total = _count(root)
     empty_preview = _empty_preview(lang)
+    i18n_payload = {
+        "viewer_engine_missing": tr(lang, "viewer_engine_missing"),
+        "viewer_loading": tr(lang, "viewer_loading"),
+        "preview_title": tr(lang, "preview_title"),
+        "viewer_title_none": tr(lang, "viewer_title_none"),
+        "viewer_choose": tr(lang, "viewer_choose"),
+        "viewer_browser_unsupported": tr(lang, "viewer_browser_unsupported"),
+        "empty_preview": empty_preview,
+    }
     lang_links = " | ".join(
-        f'<a href="/?lang={code}">{tr(code, "language_label")}</a>'
+        f'<a href="{html.escape(lang_switch_url_template.format(code=code))}">{tr(code, "language_label")}</a>'
         for code in available_languages()
     )
+    if back_url is None:
+        back_url = f"/?lang={lang}"
 
     summary = (
         f"<b>{html.escape(title_a)}</b> (A) &nbsp;vs&nbsp; <b>{html.escape(title_b)}</b> (B)<br>"
@@ -654,7 +670,10 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
     <div class="topbar">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
             <h1>{tr(lang, 'compare_title')}</h1>
-            <div style="font-size:12px;color:#5b574d;">{tr(lang, 'report_language_label')}: {lang_links}</div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:#5b574d;">
+                <a href="{html.escape(back_url)}" style="text-decoration:none;border:1px solid #b9b09a;padding:4px 9px;border-radius:999px;background:#efecdf;color:#2b2b2b;">← {tr(lang, 'error_back')}</a>
+                <div>{tr(lang, 'report_language_label')}: {lang_links}</div>
+            </div>
         </div>
         <div class="summary">{summary}</div>
     </div>
@@ -688,19 +707,12 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
     </div>
 </div>
 
-<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/STLLoader.js" integrity="sha384-QF8EmP6pyNE+i7WmcltzC4ddzFVKDxfn5WD5gXyKTSE4SCw0R25TI+q0LUlnf7tq" crossorigin="anonymous"></script>
+<script>window.I18N = {json.dumps(i18n_payload, ensure_ascii=False)};</script>
 <script>{_THREE_SCRIPT}</script>
 <script>{_JS}</script>
 </body>
 </html>"""
-
-    html_report = html_report.replace("3D двигун не завантажився в браузері", tr(lang, 'viewer_engine_missing'))
-    html_report = html_report.replace("Завантаження STL...", tr(lang, 'viewer_loading'))
-    html_report = html_report.replace("Елемент", tr(lang, 'preview_title'))
-    html_report = html_report.replace("Поточний елемент: не вибрано", tr(lang, 'viewer_title_none'))
-    html_report = html_report.replace("Оберіть елемент у дереві (зліва або справа), щоб відкрити STL.", tr(lang, 'viewer_choose'))
-    html_report = html_report.replace("Браузер не підтримує 3D-в’юшку або CDN недоступний", tr(lang, 'viewer_browser_unsupported'))
-    html_report = html_report.replace("{empty_preview}", empty_preview)
     return html_report

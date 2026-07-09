@@ -12,13 +12,15 @@ app.py — веб-сервер Flask для порівняння двох STEP-�
 
 import os
 import sys
+import math
+import html as html_lib
 import tempfile
 import shutil
 import uuid
 from collections import OrderedDict
 from pathlib import Path
 
-from flask import Flask, Response, request, send_from_directory
+from flask import Flask, Response, redirect, request, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -37,16 +39,62 @@ _MAX_SESSIONS = 10
 _sessions: OrderedDict = OrderedDict()
 
 
+def _session_dir(session_value):
+  """Return the session STL directory for legacy/new in-memory session formats."""
+  if isinstance(session_value, dict):
+    return session_value.get("dir")
+  return session_value
+
+
 def _new_session() -> tuple:
   """Створює нову temp-директорію для сесії, повертає (sid, dir_path)."""
   sid = uuid.uuid4().hex
   tmpdir = tempfile.mkdtemp(prefix="stptree_")
-  _sessions[sid] = tmpdir
+  _sessions[sid] = {"dir": tmpdir}
   # Виселяємо найстаріші сесії понад ліміт
   while len(_sessions) > _MAX_SESSIONS:
-    _, old_dir = _sessions.popitem(last=False)
+    _, old_session = _sessions.popitem(last=False)
+    old_dir = _session_dir(old_session)
     shutil.rmtree(old_dir, ignore_errors=True)
   return sid, tmpdir
+
+
+def _render_session_report(sid: str, lang: str) -> Response:
+  """Rebuild a report for an existing session so language switching keeps tree data."""
+  session = _sessions.get(sid)
+  stl_dir = _session_dir(session)
+  if not stl_dir or not os.path.isdir(stl_dir):
+    return Response(_render_error_page(lang, tr(lang, "internal_error_prefix")), status=404)
+
+  if not isinstance(session, dict):
+    return Response(_render_error_page(lang, tr(lang, "internal_error_prefix")), status=410)
+
+  path_a = session.get("path_a")
+  path_b = session.get("path_b")
+  title_a = session.get("title_a")
+  title_b = session.get("title_b")
+  vol_tol = session.get("volume_tol")
+  com_tol = session.get("com_tol")
+
+  if not path_a or not path_b or title_a is None or title_b is None or vol_tol is None or com_tol is None:
+    return Response(_render_error_page(lang, tr(lang, "internal_error_prefix")), status=410)
+
+  tree_a = parse_step(path_a, stl_dir=stl_dir)
+  tree_b = parse_step(path_b, stl_dir=stl_dir)
+  diff = compare_nodes(tree_a, tree_b, volume_tol_pct=vol_tol, com_tol_mm=com_tol)
+  stl_base_url = f"/stl/{sid}/"
+  html_report = render_report(
+    diff,
+    title_a,
+    title_b,
+    tree_a=tree_a,
+    tree_b=tree_b,
+    stl_base_url=stl_base_url,
+    lang=lang,
+    lang_switch_url_template=f"/report/{sid}?lang={{code}}",
+    back_url=f"/?lang={lang}",
+  )
+  return Response(html_report, mimetype="text/html; charset=utf-8")
 
 
 _ALLOWED = {".stp", ".step"}
@@ -112,13 +160,14 @@ def _render_upload_page(lang: str) -> str:
 
 def _render_error_page(lang: str, msg: str) -> str:
   """Build a localized standalone error page."""
+  safe_msg = html_lib.escape(msg, quote=True)
   return f"""<!DOCTYPE html><html lang=\"{lang}\"><head><meta charset=\"UTF-8\">
 <title>{tr(lang, 'error_title')}</title>
 <style>body{{font-family:sans-serif;background:#0f1115;color:#e8e8e8;
   display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
 .box{{background:#3b1a1a;color:#f48fb1;border-radius:10px;padding:28px 36px;max-width:480px}}
 a{{color:#90caf9;text-decoration:none}} .back{{display:inline-block;margin-top:12px}}</style></head>
-<body><div class="box"><h2>{tr(lang, 'error_title')}</h2><p>{msg}</p>
+<body><div class="box"><h2>{tr(lang, 'error_title')}</h2><p>{safe_msg}</p>
 <a class="back" href="/?lang={lang}">← {tr(lang, 'error_back')}</a></div></body></html>"""
 
 
@@ -280,7 +329,7 @@ def index():
 @app.route("/stl/<sid>/<filename>")
 def serve_stl(sid, filename):
   """Serve STL/PNG assets from the in-memory session cache directory."""
-  stl_dir = _sessions.get(sid)
+  stl_dir = _session_dir(_sessions.get(sid))
   if not stl_dir or not os.path.isdir(stl_dir):
     return "", 404
   safe = secure_filename(filename)
@@ -314,34 +363,50 @@ def compare():
   except ValueError:
     return _render_error_page(lang, tr(lang, "invalid_tolerance_error")), 400
 
+  if not math.isfinite(vol_tol) or not math.isfinite(com_tol) or vol_tol < 0 or com_tol < 0:
+    return _render_error_page(lang, tr(lang, "invalid_tolerance_error")), 400
+
   try:
     sid, stl_dir = _new_session()
     uploads = os.path.join(stl_dir, "uploads")
     os.makedirs(uploads)
-    path_a = os.path.join(uploads, secure_filename(fa.filename))
-    path_b = os.path.join(uploads, secure_filename(fb.filename))
+
+    safe_name_a = secure_filename(fa.filename) or "file_a.step"
+    safe_name_b = secure_filename(fb.filename) or "file_b.step"
+    path_a = os.path.join(uploads, f"a_{uuid.uuid4().hex}_{safe_name_a}")
+    path_b = os.path.join(uploads, f"b_{uuid.uuid4().hex}_{safe_name_b}")
+
     fa.save(path_a)
     fb.save(path_b)
 
-    tree_a = parse_step(path_a, stl_dir=stl_dir)
-    tree_b = parse_step(path_b, stl_dir=stl_dir)
-    diff = compare_nodes(tree_a, tree_b, volume_tol_pct=vol_tol, com_tol_mm=com_tol)
-    stl_base_url = f"/stl/{sid}/"
-    html_report = render_report(
-      diff,
-      fa.filename,
-      fb.filename,
-      tree_a=tree_a,
-      tree_b=tree_b,
-      stl_base_url=stl_base_url,
-      lang=lang,
-    )
-  except RuntimeError as exc:
-    return _render_error_page(lang, f"{tr(lang, 'read_error_prefix')}: {exc}"), 422
-  except Exception as exc:  # noqa: BLE001
-    return _render_error_page(lang, f"{tr(lang, 'internal_error_prefix')}: {exc}"), 500
+    _sessions[sid].update({
+      "path_a": path_a,
+      "path_b": path_b,
+      "title_a": fa.filename,
+      "title_b": fb.filename,
+      "volume_tol": vol_tol,
+      "com_tol": com_tol,
+    })
+    return redirect(url_for("report_for_session", sid=sid, lang=lang), code=303)
+  except RuntimeError:
+    app.logger.exception("Failed to read or parse uploaded STEP files")
+    return _render_error_page(lang, tr(lang, "read_error_prefix")), 422
+  except Exception:  # noqa: BLE001
+    app.logger.exception("Unhandled exception in /compare")
+    return _render_error_page(lang, tr(lang, "internal_error_prefix")), 500
 
-  return Response(html_report, mimetype="text/html; charset=utf-8")
+@app.route("/report/<sid>")
+def report_for_session(sid):
+  """Render existing compare result for another language without re-upload."""
+  lang = normalize_lang(request.args.get("lang"))
+  try:
+    return _render_session_report(sid, lang)
+  except RuntimeError:
+    app.logger.exception("Failed to rebuild report from stored session")
+    return Response(_render_error_page(lang, tr(lang, "read_error_prefix")), status=422)
+  except Exception:  # noqa: BLE001
+    app.logger.exception("Unhandled exception in /report/<sid>")
+    return Response(_render_error_page(lang, tr(lang, "internal_error_prefix")), status=500)
 
 
 if __name__ == "__main__":
