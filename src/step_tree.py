@@ -51,6 +51,7 @@ except ImportError:
 
 @dataclasses.dataclass
 class Node:
+    """Represents one STEP assembly-tree node with computed geometry properties."""
     name: str
     is_assembly: bool
     volume: Optional[float] = None          # мм^3 (одиниці STEP-файлу)

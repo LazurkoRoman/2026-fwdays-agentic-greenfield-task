@@ -28,6 +28,7 @@ from step_tree import Node
 
 @dataclasses.dataclass
 class DiffNode:
+    """Represents one compared node and its recursive diff metadata."""
     name: str
     status: str  # match | changed | added | removed
     is_assembly: bool
