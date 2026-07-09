@@ -40,12 +40,14 @@ def box_cylinder_step(tmp_path_factory):
 
 
 def test_parses_correct_number_of_children(box_cylinder_step):
+    """Parser should keep assembly hierarchy and expose two direct children."""
     tree = parse_step(box_cylinder_step)
     assert tree.is_assembly is True
     assert len(tree.children) == 2
 
 
 def test_box_volume_matches_analytic_formula(box_cylinder_step):
+    """Box volume from STEP parsing must match analytical box volume."""
     tree = parse_step(box_cylinder_step)
     box_node = next(c for c in tree.children if c.name.startswith("Box1"))
     expected_volume = 10 * 20 * 5  # = 1000
@@ -53,6 +55,7 @@ def test_box_volume_matches_analytic_formula(box_cylinder_step):
 
 
 def test_cylinder_volume_matches_analytic_formula(box_cylinder_step):
+    """Cylinder volume from STEP parsing must match analytical cylinder volume."""
     tree = parse_step(box_cylinder_step)
     cyl_node = next(c for c in tree.children if c.name.startswith("Cylinder1"))
     expected_volume = math.pi * (3 ** 2) * 15  # π r^2 h
@@ -60,6 +63,7 @@ def test_cylinder_volume_matches_analytic_formula(box_cylinder_step):
 
 
 def test_box_center_of_mass_is_origin(box_cylinder_step):
+    """Box located at origin should have COM at (0, 0, 0)."""
     tree = parse_step(box_cylinder_step)
     box_node = next(c for c in tree.children if c.name.startswith("Box1"))
     assert box_node.com == pytest.approx((0, 0, 0), abs=1e-3)
@@ -77,12 +81,14 @@ def test_cylinder_center_of_mass_reflects_assembly_location(box_cylinder_step):
 
 
 def test_assembly_volume_is_sum_of_children(box_cylinder_step):
+    """Assembly volume should equal the sum of child volumes."""
     tree = parse_step(box_cylinder_step)
     child_sum = sum(c.volume for c in tree.children)
     assert tree.volume == pytest.approx(child_sum, rel=1e-6)
 
 
 def test_assembly_com_is_volume_weighted_average(box_cylinder_step):
+    """Assembly COM should be the volume-weighted average of child COM values."""
     tree = parse_step(box_cylinder_step)
     total_v = sum(c.volume for c in tree.children)
     expected_x = sum(c.com[0] * c.volume for c in tree.children) / total_v
@@ -92,26 +98,32 @@ def test_assembly_com_is_volume_weighted_average(box_cylinder_step):
 # ---------- Тести compare.py ----------
 
 def test_com_distance_euclidean():
+    """COM helper should return Euclidean distance in millimeters."""
     assert _com_distance((0, 0, 0), (3, 4, 0)) == pytest.approx(5.0)
 
 
 def test_com_distance_none_if_missing():
+    """COM helper should return None when one side is missing."""
     assert _com_distance(None, (1, 2, 3)) is None
 
 
 def test_volume_delta_pct_basic():
+    """Volume delta helper should compute absolute percentage difference."""
     assert _volume_delta_pct(100, 110) == pytest.approx(10.0)
 
 
 def test_volume_delta_pct_zero_base_equal():
+    """Zero-to-zero volume delta should be treated as no computable delta."""
     assert _volume_delta_pct(0, 0) is None
 
 
 def test_volume_delta_pct_zero_base_nonequal():
+    """Zero baseline and non-zero comparison should map to 100% delta."""
     assert _volume_delta_pct(0, 5) == 100.0
 
 
 def test_compare_identical_trees_is_match(box_cylinder_step):
+    """Comparing identical trees should produce only match statuses."""
     tree_a = parse_step(box_cylinder_step)
     tree_b = parse_step(box_cylinder_step)
     diff = compare_nodes(tree_a, tree_b)
@@ -120,6 +132,7 @@ def test_compare_identical_trees_is_match(box_cylinder_step):
 
 
 def test_compare_added_node(box_cylinder_step, tmp_path):
+    """A part present only in file B should be marked as added."""
     box = cq.Workplane("XY").box(10, 20, 5)
     cyl = cq.Workplane("XY").cylinder(15, 3)
     plate = cq.Workplane("XY").box(30, 30, 2)
@@ -142,6 +155,7 @@ def test_compare_added_node(box_cylinder_step, tmp_path):
 
 
 def test_compare_changed_volume_exceeds_tolerance(box_cylinder_step, tmp_path):
+    """Volume changes beyond tolerance should produce changed status."""
     box = cq.Workplane("XY").box(10, 20, 5)
     cyl = cq.Workplane("XY").cylinder(15, 3.5)  # обʼєм суттєво більший
 
