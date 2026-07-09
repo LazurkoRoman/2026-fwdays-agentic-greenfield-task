@@ -140,7 +140,7 @@ Assignment evidence:
 
 - Author: Roman Lazurko.
 - Pull request: https://github.com/koldovsky/2026-fwdays-agentic-greenfield-task/pull/46
-- Demo video (1-2 min): MISSING (no public link added in this repository yet).
+- Demo video (1-2 min): https://youtu.be/_G7HxOYDoVc
 
 Agentic practices actually used:
 
