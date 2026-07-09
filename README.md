@@ -1,47 +1,124 @@
-# Agentic Engineering: Greenfield — домашнє завдання
+# stp-tree-diff
 
-Курс **fwdays Academy · Agentic Engineering: Greenfield**.
+STEP assembly comparison tool built for the Fwdays Agentic Engineering greenfield assignment.
 
-Це завдання — **не про розмір продукту, а про процес**: показати, що ти вмієш будувати з нуля, керуючи AI-агентами **інженерно** (контекст, цикли, верифікація, maker ≠ checker), а не «вайбкодити».
+The project compares two STEP files at the assembly-tree level, computes volume and center of mass for each node, and produces a visual diff with per-part previews and a 3D STL viewer.
 
-> Стек — **будь-який**. Цей репозиторій навмисно майже порожній: він не привʼязаний до жодної технології. Ти приносиш свій проєкт і свій підхід.
+## What Is Implemented
 
-## Що зробити
+- CLI comparison of two `.stp` / `.step` files.
+- Web interface for uploading file A and file B.
+- Three-column result view: tree A, diff, tree B.
+- Diff statuses: `match`, `changed`, `added`, `removed`.
+- Per-node STL export and PNG preview generation.
+- Interactive 3D viewer for the selected element.
+- Multilingual UI: Ukrainian, English, Danish.
+- Regression tests for geometry and assembly placement.
 
-1. **Побудуй невеликий власний проєкт** — будь-який, який тобі цікавий.
-   - Стек вільний: Next.js, Python, Go, Rust, мобільний застосунок, CLI, бот — на твій вибір.
-   - Масштаб скромний. Краще маленький проєкт, проведений через повний інженерний цикл, ніж великий «наче працює».
-2. **Застосуй практики Agentic Engineering** з курсу — стільки, скільки доречно для твого проєкту:
-   - контекст-інженерія (правила / `AGENTS.md`, статичний vs динамічний контекст);
-   - цикли (loop engineering) замість ручного покрокового промптингу;
-   - верифікація: тести / evals / перевірки замість «здається, працює»;
-   - maker ≠ checker (окремий агент або прохід на рев'ю);
-   - специфікації наперед (SDD), якщо доречно.
-   - **Project Factory — за бажанням, не обовʼязково** (хочеш повну фабрику — запусти `/project-factory:init` у себе).
-3. **Запиши відео-демо на 1–2 хвилини**: коротко покажи продукт і розкажи, **як саме ти будував(ла) його агентно**.
+## Why This Exists
 
-## Як здати
+When a CAD assembly changes, the useful question is not only whether the file changed, but which exact part changed, which part moved, and which part was added or removed. This tool makes that visible without opening both revisions manually in a CAD system.
 
-1. Зроби **fork** цього репозиторію (разом із ним приїдуть конфіг CodeRabbit і шаблон PR).
-2. Увімкни **CodeRabbit** на своєму форку (безкоштовно для публічних репо) — він рев'юитиме твій PR як ментор, українською.
-3. Поклади свій проєкт у форк на окрему гілку (будь-яким стеком). Якщо зручніше тримати код в окремому репозиторії — додай на нього посилання в описі PR.
-4. Відкрий **Pull Request** і заповни шаблон:
-   - **Імʼя** (справжнє);
-   - **посилання на відео-демо** (1–2 хв);
-   - **опис застосованих практик Agentic Engineering** — що саме ти робив(ла) агентно, які інструменти / MCP використав(ла), що вирішував(ла) ти, а що агент.
-5. Прочитай фідбек CodeRabbit, поітеруй за потреби — і **надішли посилання на свій PR** як здачу.
+## Install
 
-## Як оцінюється
+```bash
+pip install -r requirements.txt --break-system-packages
+```
 
-Дивимось на **докази процесу**, а не на стек:
+Python 3.10+ is required. Geometry parsing is done through OpenCASCADE bindings pulled by `cadquery` / `cadquery-ocp`.
 
-- ✅ вказане справжнє імʼя;
-- ✅ є відео-демо (1–2 хв);
-- ✅ є **змістовний опис** застосованих агентних практик;
-- ✅ результат доведено до кінця (а не «згенерував і кинув»).
+## CLI Usage
 
-**Бонус** — видимі артефакти інженерії: правила / `AGENTS.md`, специфікації, тести / evals, сліди верифікації, окреме рев'ю, записи демо.
+```bash
+python cli.py file_a.stp file_b.stp -o report.html
+```
 
----
+Useful options:
 
-Питання — у каналі курсу. Успіхів, і нехай цикли працюють на тебе 🟢
+- `--volume-tol 0.5` sets the allowed volume delta percentage.
+- `--com-tol 0.1` sets the allowed center-of-mass delta in mm.
+- `--lang en` switches report language to `uk`, `en`, or `da`.
+- `--json` also prints the diff tree as JSON.
+
+Example:
+
+```bash
+python cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o report.html --lang en
+```
+
+## Web Usage
+
+```bash
+python app.py
+```
+
+Then open `http://127.0.0.1:5000`.
+
+The web UI lets the user:
+
+- upload two STEP files,
+- tune geometry tolerances,
+- switch UI language,
+- inspect both trees side by side,
+- click any element to open its STL and PNG preview.
+
+## Verification
+
+Run the automated checks:
+
+```bash
+pytest tests/ -v
+```
+
+Run a smoke comparison:
+
+```bash
+python cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o report.html
+```
+
+The tests validate geometry against independent analytical references:
+
+- box volume: $V = a \cdot b \cdot c$
+- cylinder volume: $V = \pi r^2 h$
+
+There is also a regression test that protects the assembly-placement bug where center of mass could be computed from the referred label instead of the placed instance shape.
+
+## Agentic Engineering Artifacts
+
+This repository includes explicit process artifacts used during development:
+
+- `AGENTS.md` for stable project context and technical traps.
+- `docs/current-state.md` for the current system snapshot.
+- `docs/spec-template.md` for pre-implementation feature specs.
+- `.github/workflows/tests.yml` for automated verification.
+
+Development slices followed this loop:
+
+`context -> requirements -> specification -> small slice -> tests -> implementation -> verification -> review -> summary`
+
+## Project Structure
+
+```text
+cli.py                 CLI entry point
+app.py                 Flask web app
+src/step_tree.py       STEP -> tree parsing, volume/COM, STL/PNG export
+src/compare.py         tree diff logic
+src/report.py          HTML report generation
+src/i18n.py            translations
+tests/test_geometry.py geometry and regression tests
+```
+
+## Current Limitations
+
+- Node matching is name-based, so renamed parts appear as removed plus added.
+- Large assemblies can make STL and PNG generation slower.
+- Session asset storage is temporary and FIFO-limited in the Flask app.
+
+## Submission Notes
+
+For the assignment submission, the most relevant evidence in this repository is:
+
+- working product with CLI and web UI,
+- explicit agentic workflow artifacts,
+- independent verification via tests,
+- maker/checker separation captured through documented review flow.
