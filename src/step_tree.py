@@ -60,6 +60,7 @@ class Node:
     children: list = dataclasses.field(default_factory=list)
 
     def to_dict(self):
+        """Convert a geometry node tree into a JSON-serializable dictionary."""
         return {
             "name": self.name,
             "is_assembly": self.is_assembly,
@@ -72,6 +73,7 @@ class Node:
 
 
 def _label_name(label: TDF_Label, fallback: str) -> str:
+    """Read XCAF label name, or return fallback when name attribute is missing."""
     name_attr = TDataStd_Name()
     if label.FindAttribute(TDataStd_Name.GetID_s(), name_attr):
         return name_attr.Get().ToExtString()
@@ -109,6 +111,7 @@ def _export_stl(shape: TopoDS_Shape, path: str, deflection: float = 0.1) -> bool
 
 
 def _write_placeholder_png(path: str, title: str = "Preview unavailable") -> None:
+    """Write a small placeholder PNG when geometry preview rendering is unavailable."""
     fig = Figure(figsize=(1.2, 0.9), dpi=120)
     FigureCanvas(fig)
     ax = fig.add_subplot(111)
@@ -121,6 +124,7 @@ def _write_placeholder_png(path: str, title: str = "Preview unavailable") -> Non
 
 
 def _read_stl_triangles(path: str):
+    """Read STL triangles from binary or ASCII STL files."""
     data = Path(path).read_bytes()
     if len(data) >= 84:
         face_count = struct.unpack_from("<I", data, 80)[0]
@@ -152,6 +156,7 @@ def _read_stl_triangles(path: str):
 
 
 def _export_png_from_stl(stl_path: str, png_path: str, title: str = "Preview") -> bool:
+    """Render an isometric PNG preview from STL triangles."""
     try:
         triangles = _read_stl_triangles(stl_path)
         if not triangles:
@@ -201,6 +206,7 @@ def _export_png_from_stl(stl_path: str, png_path: str, title: str = "Preview") -
 
 
 def _get_components(shape_tool, label):
+    """Return direct XCAF component labels for an assembly label."""
     seq = TDF_LabelSequence()
     shape_tool.GetComponents_s(label, seq)
     return [seq.Value(i) for i in range(1, seq.Length() + 1)]

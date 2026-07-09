@@ -53,10 +53,12 @@ _ALLOWED = {".stp", ".step"}
 
 
 def _allowed(filename: str) -> bool:
-    return Path(filename).suffix.lower() in _ALLOWED
+  """Return True when an uploaded filename has an allowed STEP extension."""
+  return Path(filename).suffix.lower() in _ALLOWED
 
 
 def _language_links(lang: str) -> str:
+  """Render language switch links for the upload page header."""
   return " ".join(
     f'<a href="/?lang={code}" class="lang-link{" active" if code == lang else ""}">{tr(code, "language_label")}</a>'
     for code in available_languages()
@@ -64,6 +66,7 @@ def _language_links(lang: str) -> str:
 
 
 def _render_upload_page(lang: str) -> str:
+  """Return localized upload-page HTML for the requested language."""
   page = _UPLOAD_PAGE
   page = page.replace('lang="uk"', f'lang="{lang}"')
   page = page.replace("<title>STEP Tree Comparator</title>", f"<title>{tr(lang, 'app_title')}</title>")
@@ -108,6 +111,7 @@ def _render_upload_page(lang: str) -> str:
 
 
 def _render_error_page(lang: str, msg: str) -> str:
+  """Build a localized standalone error page."""
   return f"""<!DOCTYPE html><html lang=\"{lang}\"><head><meta charset=\"UTF-8\">
 <title>{tr(lang, 'error_title')}</title>
 <style>body{{font-family:sans-serif;background:#0f1115;color:#e8e8e8;
@@ -268,12 +272,14 @@ document.getElementById('frm').addEventListener('submit', function() {
 
 @app.route("/")
 def index():
+  """Serve the localized upload page."""
   lang = normalize_lang(request.args.get("lang"))
   return _render_upload_page(lang)
 
 
 @app.route("/stl/<sid>/<filename>")
 def serve_stl(sid, filename):
+  """Serve STL/PNG assets from the in-memory session cache directory."""
   stl_dir = _sessions.get(sid)
   if not stl_dir or not os.path.isdir(stl_dir):
     return "", 404
@@ -289,6 +295,7 @@ def serve_stl(sid, filename):
 
 @app.route("/compare", methods=["POST"])
 def compare():
+  """Compare two uploaded STEP files and return a localized HTML report."""
   lang = normalize_lang(request.form.get("lang") or request.args.get("lang"))
   fa = request.files.get("file_a")
   fb = request.files.get("file_b")
@@ -338,4 +345,6 @@ def compare():
 
 
 if __name__ == "__main__":
-    app.run(debug=False, host="127.0.0.1", port=5000)
+  host = os.environ.get("APP_HOST", "0.0.0.0")
+  port = int(os.environ.get("APP_PORT", "5000"))
+  app.run(debug=False, host=host, port=port)

@@ -52,7 +52,9 @@ python cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o report.
 python app.py
 ```
 
-Then open `http://127.0.0.1:5000`.
+Then open `http://127.0.0.1:5000` locally, or `http://<server-ip>:5000` from another machine if port 5000 is forwarded and allowed by the firewall.
+
+The Flask app binds to `0.0.0.0:5000` by default so it can be reached through NAT/router forwarding.
 
 The web UI lets the user:
 

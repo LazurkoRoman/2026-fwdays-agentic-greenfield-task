@@ -21,6 +21,7 @@ from report import render_report
 
 
 def main():
+    """Parse CLI arguments, compare two STEP trees, and write an HTML report."""
     parser = argparse.ArgumentParser(description="STEP tree comparison")
     parser.add_argument("file_a", help="Baseline STEP file (A)")
     parser.add_argument("file_b", help="Comparison STEP file (B)")

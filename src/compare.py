@@ -40,6 +40,7 @@ class DiffNode:
     children: list = dataclasses.field(default_factory=list)
 
     def to_dict(self):
+        """Convert a diff node (including children) to a JSON-serializable dict."""
         return {
             "name": self.name,
             "status": self.status,
@@ -55,12 +56,14 @@ class DiffNode:
 
 
 def _com_distance(a: Optional[tuple], b: Optional[tuple]) -> Optional[float]:
+    """Return Euclidean distance between two COM tuples, or None when missing."""
     if a is None or b is None:
         return None
     return round(math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b))), 4)
 
 
 def _volume_delta_pct(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    """Return absolute percentage delta between two volumes."""
     if a is None or b is None:
         return None
     if a == 0:

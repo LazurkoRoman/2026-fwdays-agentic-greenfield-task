@@ -27,10 +27,12 @@ COLORS = {
 }
 
 def _status_label(lang: str, status: str) -> str:
+    """Return localized status label for a diff state."""
     return tr(lang, f"status_{status}")
 
 
 def _empty_preview(lang: str) -> str:
+    """Return a data-URI SVG placeholder used when PNG preview is unavailable."""
     return "data:image/svg+xml;charset=utf-8," + quote(
         "<svg xmlns='http://www.w3.org/2000/svg' width='240' height='180' viewBox='0 0 240 180'>"
         "<rect width='240' height='180' fill='#d8d1be'/>"
@@ -486,12 +488,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 def _fmt(v):
+    """Format optional numeric values for report output."""
     return "—" if v is None else v
 
 
 # ---------- Plain Node renderer ----------
 
 def _render_plain_node(node, depth: int, ctr: list, stl_base_url: str = None, lang: str = "uk") -> str:
+    """Render one plain tree node (A or B side) recursively as HTML."""
     ctr[0] += 1
     uid = f"p{ctr[0]}"
     icon = "▣" if node.is_assembly else "◆"
@@ -538,6 +542,7 @@ def _render_plain_node(node, depth: int, ctr: list, stl_base_url: str = None, la
 # ---------- Diff Node renderer ----------
 
 def _render_diff_node(node: DiffNode, depth: int, ctr: list, lang: str = "uk") -> str:
+    """Render one diff tree node recursively as HTML."""
     ctr[0] += 1
     uid = f"d{ctr[0]}"
     color = COLORS[node.status]
@@ -581,6 +586,7 @@ def _render_diff_node(node: DiffNode, depth: int, ctr: list, lang: str = "uk") -
 
 
 def _count(node: DiffNode, acc: dict = None) -> dict:
+    """Accumulate recursive diff-status counts for summary badges."""
     if acc is None:
         acc = {"total": 0, "match": 0, "changed": 0, "added": 0, "removed": 0}
     acc["total"] += 1
@@ -594,29 +600,30 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
                                     tree_a=None, tree_b=None,
                                     stl_base_url: str = None,
                                     lang: str = "uk") -> str:
-        lang = normalize_lang(lang)
-        total = _count(root)
-        empty_preview = _empty_preview(lang)
-        lang_links = " | ".join(
-                f'<a href="/?lang={code}">{tr(code, "language_label")}</a>'
-                for code in available_languages()
-        )
+    """Build a full localized HTML report with A/B trees, diff panel, and 3D viewer."""
+    lang = normalize_lang(lang)
+    total = _count(root)
+    empty_preview = _empty_preview(lang)
+    lang_links = " | ".join(
+        f'<a href="/?lang={code}">{tr(code, "language_label")}</a>'
+        for code in available_languages()
+    )
 
-        summary = (
-                f"<b>{html.escape(title_a)}</b> (A) &nbsp;vs&nbsp; <b>{html.escape(title_b)}</b> (B)<br>"
-                f"{tr(lang, 'compare_summary_nodes')}: {total['total']} &nbsp;·&nbsp; "
-                f"<span style='color:{COLORS['match']}'>{tr(lang, 'compare_summary_ok')}: {total['match']}</span> &nbsp;·&nbsp; "
-                f"<span style='color:{COLORS['changed']}'>{tr(lang, 'compare_summary_changed')}: {total['changed']}</span> &nbsp;·&nbsp; "
-                f"<span style='color:{COLORS['added']}'>{tr(lang, 'compare_summary_added')}: {total['added']}</span> &nbsp;·&nbsp; "
-                f"<span style='color:{COLORS['removed']}'>{tr(lang, 'compare_summary_removed')}: {total['removed']}</span>"
-        )
+    summary = (
+        f"<b>{html.escape(title_a)}</b> (A) &nbsp;vs&nbsp; <b>{html.escape(title_b)}</b> (B)<br>"
+        f"{tr(lang, 'compare_summary_nodes')}: {total['total']} &nbsp;·&nbsp; "
+        f"<span style='color:{COLORS['match']}'>{tr(lang, 'compare_summary_ok')}: {total['match']}</span> &nbsp;·&nbsp; "
+        f"<span style='color:{COLORS['changed']}'>{tr(lang, 'compare_summary_changed')}: {total['changed']}</span> &nbsp;·&nbsp; "
+        f"<span style='color:{COLORS['added']}'>{tr(lang, 'compare_summary_added')}: {total['added']}</span> &nbsp;·&nbsp; "
+        f"<span style='color:{COLORS['removed']}'>{tr(lang, 'compare_summary_removed')}: {total['removed']}</span>"
+    )
 
-        diff_html = _render_diff_node(root, 0, [0], lang=lang)
+    diff_html = _render_diff_node(root, 0, [0], lang=lang)
 
-        if tree_a is not None and tree_b is not None:
-                plain_a = _render_plain_node(tree_a, 0, [0], stl_base_url, lang=lang)
-                plain_b = _render_plain_node(tree_b, 0, [0], stl_base_url, lang=lang)
-                body = f"""
+    if tree_a is not None and tree_b is not None:
+        plain_a = _render_plain_node(tree_a, 0, [0], stl_base_url, lang=lang)
+        plain_b = _render_plain_node(tree_b, 0, [0], stl_base_url, lang=lang)
+        body = f"""
 <div class="panels">
     <div class="panel">
         <div class="panel-header a">▤ {tr(lang, 'compare_panel_a')} · {html.escape(title_a)}</div>
@@ -631,10 +638,10 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
         <div class="panel-body">{plain_b}</div>
     </div>
 </div>"""
-        else:
-                body = f'<div class="panel-body">{diff_html}</div>'
+    else:
+        body = f'<div class="panel-body">{diff_html}</div>'
 
-        html_report = f"""<!DOCTYPE html>
+    html_report = f"""<!DOCTYPE html>
 <html lang="{lang}">
 <head>
 <meta charset="UTF-8">
@@ -689,11 +696,11 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
 </body>
 </html>"""
 
-        html_report = html_report.replace("3D двигун не завантажився в браузері", tr(lang, 'viewer_engine_missing'))
-        html_report = html_report.replace("Завантаження STL...", tr(lang, 'viewer_loading'))
-        html_report = html_report.replace("Елемент", tr(lang, 'preview_title'))
-        html_report = html_report.replace("Поточний елемент: не вибрано", tr(lang, 'viewer_title_none'))
-        html_report = html_report.replace("Оберіть елемент у дереві (зліва або справа), щоб відкрити STL.", tr(lang, 'viewer_choose'))
-        html_report = html_report.replace("Браузер не підтримує 3D-в’юшку або CDN недоступний", tr(lang, 'viewer_browser_unsupported'))
-        html_report = html_report.replace("{empty_preview}", empty_preview)
-        return html_report
+    html_report = html_report.replace("3D двигун не завантажився в браузері", tr(lang, 'viewer_engine_missing'))
+    html_report = html_report.replace("Завантаження STL...", tr(lang, 'viewer_loading'))
+    html_report = html_report.replace("Елемент", tr(lang, 'preview_title'))
+    html_report = html_report.replace("Поточний елемент: не вибрано", tr(lang, 'viewer_title_none'))
+    html_report = html_report.replace("Оберіть елемент у дереві (зліва або справа), щоб відкрити STL.", tr(lang, 'viewer_choose'))
+    html_report = html_report.replace("Браузер не підтримує 3D-в’юшку або CDN недоступний", tr(lang, 'viewer_browser_unsupported'))
+    html_report = html_report.replace("{empty_preview}", empty_preview)
+    return html_report

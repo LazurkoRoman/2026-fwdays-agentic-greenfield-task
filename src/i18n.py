@@ -200,6 +200,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
 
 def normalize_lang(lang: str | None) -> str:
+    """Normalize user language code and fall back to Ukrainian when unknown."""
     if not lang:
         return "uk"
     lang = lang.lower().strip()
@@ -211,10 +212,12 @@ def normalize_lang(lang: str | None) -> str:
 
 
 def tr(lang: str | None, key: str, **kwargs: Any) -> str:
+    """Translate a key for the requested language with optional format params."""
     resolved = normalize_lang(lang)
     text = TRANSLATIONS[resolved].get(key, TRANSLATIONS["en"].get(key, key))
     return text.format(**kwargs)
 
 
 def available_languages() -> list[str]:
+    """Return supported language codes for UI language switchers."""
     return list(LANGS)
