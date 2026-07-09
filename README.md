@@ -62,6 +62,24 @@ The web UI lets the user:
 - inspect both trees side by side,
 - click any element to open its STL and PNG preview.
 
+## Run As Service-Like Task On Windows
+
+If you want the app to start in the background automatically on Windows, use the provided Scheduled Task installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_service.ps1
+```
+
+This registers the task `STPTreeDiffWebApp`, which launches the Flask app through the project `.venv`.
+
+To remove it later:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall_service.ps1
+```
+
+Note: this is a Windows Scheduled Task, not a native Windows Service wrapper. For this Python/Flask app it is the most reliable built-in option without adding extra service-manager dependencies.
+
 ## Verification
 
 Run the automated checks:
