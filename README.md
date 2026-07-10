@@ -4,6 +4,17 @@ STEP assembly comparison tool built for the Fwdays Agentic Engineering greenfiel
 
 The project compares two STEP files at the assembly-tree level, computes volume and center of mass for each node, and produces a visual diff with per-part previews and a 3D STL viewer.
 
+## Assignment Checklist
+
+- Author: Roman Lazurko
+- Pull request: https://github.com/koldovsky/2026-fwdays-agentic-greenfield-task/pull/46
+- Demo video (1-2 min): https://youtu.be/_G7HxOYDoVc
+- Agentic process context: `AGENTS.md`
+- Current system snapshot: `docs/current-state.md`
+- Slice specs: `docs/spec-template.md`, `docs/spec-reliability-hardening.md`, `docs/spec-deferred-enhancements.md`
+- Slice specs: `docs/spec-template.md`, `docs/spec-reliability-hardening.md`, `docs/spec-deferred-enhancements.md`, `docs/spec-ui-theme-activation.md`
+- Release checklist: `docs/release-checklist.md`
+
 ## What Is Implemented
 
 - CLI comparison of two `.stp` / `.step` files.
@@ -12,6 +23,8 @@ The project compares two STEP files at the assembly-tree level, computes volume 
 - Diff statuses: `match`, `changed`, `added`, `removed`.
 - Per-node STL export and PNG preview generation.
 - Interactive 3D viewer for the selected element.
+- Report light/dark theme toggle with persisted preference.
+- Element activation from both node name and node thumbnail.
 - Multilingual UI: Ukrainian, English, Danish.
 - Regression tests for geometry and assembly placement.
 
@@ -22,10 +35,18 @@ When a CAD assembly changes, the useful question is not only whether the file ch
 ## Install
 
 ```bash
-pip install -r requirements.txt --break-system-packages
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
 ```
 
-Python 3.10+ is required. Geometry parsing is done through OpenCASCADE bindings pulled by `cadquery` / `cadquery-ocp`.
+On Linux/macOS:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt --break-system-packages
+```
+
+Python 3.10+ is required. Geometry parsing uses OpenCASCADE bindings from `cadquery` / `cadquery-ocp`. Preview rendering also requires explicit `numpy` and `matplotlib` pins listed in `requirements.txt`.
 
 ## CLI Usage
 
@@ -39,14 +60,26 @@ Useful options:
 - `--com-tol 0.1` sets the allowed center-of-mass delta in mm.
 - `--lang en` switches report language to `uk`, `en`, or `da`.
 - `--json` also prints the diff tree as JSON.
+- `--assets-dir report_assets` writes STL/PNG previews next to the HTML report and enables the embedded 3D viewer.
 
 Example:
 
 ```bash
 python cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o report.html --lang en
+python cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o report.html --assets-dir report_assets
 ```
 
+Without `--assets-dir`, the CLI report still shows trees and diff values, but STL/PNG previews and the 3D viewer are not populated.
+
 ## Web Usage
+
+Production / background serving:
+
+```bash
+python wsgi.py
+```
+
+Local development:
 
 ```bash
 python app.py
@@ -61,18 +94,35 @@ The web UI lets the user:
 - upload two STEP files,
 - tune geometry tolerances,
 - switch UI language,
+- switch report light/dark theme,
 - inspect both trees side by side,
-- click any element to open its STL and PNG preview.
+- click any element name or thumbnail to open its STL and PNG preview.
+
+The web app parses each uploaded pair once per session, caches parsed trees plus diff, and generates STL/PNG previews lazily on first request. Switching report language re-renders HTML only.
+
+Environment variables for serving:
+
+- `APP_HOST` (default `0.0.0.0`)
+- `APP_PORT` (default `5000`)
+- `APP_THREADS` for Waitress (default `4`)
+
+Health endpoint:
+
+- `GET /healthz` returns `ok` with HTTP 200.
 
 ## Run As Service-Like Task On Windows
 
-If you want the app to start in the background automatically on Windows, use the provided Scheduled Task installer:
+Create the virtual environment first, then install the scheduled task:
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File .\install_service.ps1
 ```
 
-This registers the task `STPTreeDiffWebApp`, which launches the Flask app through the project `.venv`.
+If you want remote access, allow TCP port 5000 through Windows Firewall.
+
+This registers the task `STPTreeDiffWebApp`, which launches the app through `wsgi.py` and the project `.venv`, writing logs to `logs\app.log`.
 
 To remove it later:
 
@@ -80,7 +130,27 @@ To remove it later:
 powershell -ExecutionPolicy Bypass -File .\uninstall_service.ps1
 ```
 
+Quick operations:
+
+```powershell
+# restart service-like task
+schtasks /End /TN STPTreeDiffWebApp
+schtasks /Run /TN STPTreeDiffWebApp
+
+# inspect status
+schtasks /Query /TN STPTreeDiffWebApp /V /FO LIST
+```
+
+Runtime logs are written to `logs\app.log`.
+
 Note: this is a Windows Scheduled Task, not a native Windows Service wrapper. For this Python/Flask app it is the most reliable built-in option without adding extra service-manager dependencies.
+
+Troubleshooting notes:
+
+- If task state is `Running` but the app is not reachable, check `logs\app.log` first.
+- `Last Result` can temporarily show a non-zero value while the restart loop in `run_app.ps1` recovers from failures.
+- If `\.venv\Scripts\python.exe` is missing, recreate the venv and reinstall dependencies before re-running `install_service.ps1`.
+- If port `5000` is busy, either stop the conflicting process or change `APP_PORT`.
 
 ## Verification
 
@@ -110,6 +180,9 @@ This repository includes explicit process artifacts used during development:
 - `AGENTS.md` for stable project context and technical traps.
 - `docs/current-state.md` for the current system snapshot.
 - `docs/spec-template.md` for pre-implementation feature specs.
+- `docs/spec-reliability-hardening.md` for the reliability slice.
+- `docs/spec-deferred-enhancements.md` for lazy assets, path IDs, templates, and WSGI.
+- `docs/spec-ui-theme-activation.md` for report theme toggle and element activation fixes.
 - `.github/workflows/tests.yml` for automated verification.
 
 Development slices followed this loop:
@@ -120,19 +193,25 @@ Development slices followed this loop:
 
 ```text
 cli.py                 CLI entry point
-app.py                 Flask web app
-src/step_tree.py       STEP -> tree parsing, volume/COM, STL/PNG export
-src/compare.py         tree diff logic
+app.py                 Flask web app with cached sessions and lazy assets
+wsgi.py                Waitress production entry point
+templates/             Jinja2 upload and error pages
+src/step_tree.py       STEP -> tree parsing, path_id, volume/COM, STL/PNG export
+src/compare.py         tree diff logic by path_id
 src/report.py          HTML report generation
 src/i18n.py            translations
-tests/test_geometry.py geometry and regression tests
+tests/test_geometry.py geometry, compare, and regression tests
+tests/test_app.py      Flask upload/report/lazy asset smoke tests
 ```
 
-## Current Limitations
+## Known Tradeoffs
 
-- Node matching is name-based, so renamed parts appear as removed plus added.
-- Large assemblies can make STL and PNG generation slower.
-- Session asset storage is temporary and FIFO-limited in the Flask app.
+| Decision                            | Benefit                           | Cost                                              | Future Improvement                         |
+| ----------------------------------- | --------------------------------- | ------------------------------------------------- | ------------------------------------------ |
+| Match by hierarchical `path_id`     | Stable deterministic diff mapping | Renames appear as removed + added                 | Add optional rename-tolerant matching mode |
+| Lazy STL/PNG generation in web mode | Faster initial compare response   | First preview click may be slower on heavy solids | Add background preview queue with progress |
+| In-memory FIFO session cache        | Simple and fast runtime state     | Limited retention and memory-bound lifetime       | Add optional persistent cache backend      |
+| Waitress-only app serving in repo   | Easy production entry point       | TLS/auth/reverse-proxy not included by default    | Add nginx/IIS deployment templates         |
 
 ## Submission Notes
 

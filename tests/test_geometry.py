@@ -19,8 +19,8 @@ import cadquery as cq
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from step_tree import parse_step
-from compare import compare_nodes, _com_distance, _volume_delta_pct
+from step_tree import parse_step, encode_path_id, decode_path_id, build_path_id
+from compare import compare_nodes, _com_distance, _volume_delta_pct, _volume_within_tolerance, _com_within_tolerance
 
 
 @pytest.fixture(scope="module")
@@ -61,6 +61,38 @@ def test_parses_correct_number_of_children(box_cylinder_step):
     tree = parse_step(box_cylinder_step)
     assert tree.is_assembly is True
     assert len(tree.children) == 2
+    assert tree.path_id.startswith("/")
+
+
+def test_nodes_have_unique_path_ids(box_cylinder_step):
+    """Every node in a tree should expose a unique hierarchical path_id."""
+    tree = parse_step(box_cylinder_step)
+    seen = set()
+
+    def walk(node):
+        assert node.path_id not in seen
+        seen.add(node.path_id)
+        for child in node.children:
+            walk(child)
+
+    walk(tree)
+    assert any(path_id.endswith("Box1") for path_id in seen)
+
+
+def test_path_id_encoding_roundtrip():
+    """Encoded path ids should round-trip for URL-safe asset routes."""
+    originals = ["/TestAssembly/Box1", "/TestAssembly/Box #2"]
+    for original in originals:
+        encoded = encode_path_id(original)
+        assert decode_path_id(encoded) == original
+
+
+def test_build_path_id_handles_duplicate_suffixes():
+    """Duplicate display names should produce distinct path ids."""
+    parent = "/Assembly"
+    first = build_path_id(parent, "Bolt")
+    second = build_path_id(parent, "Bolt #2")
+    assert first != second
 
 
 def test_box_volume_matches_analytic_formula(box_cylinder_step):
@@ -149,12 +181,28 @@ def test_volume_delta_pct_zero_base_nonequal():
     assert _volume_delta_pct(0, 5) == 100.0
 
 
+def test_volume_within_tolerance_both_none():
+    """Missing volume on both sides should be treated as a match."""
+    assert _volume_within_tolerance(None, None, 0.5) is True
+
+
+def test_volume_within_tolerance_one_missing():
+    """Missing volume on one side should not be treated as a match."""
+    assert _volume_within_tolerance(100.0, None, 0.5) is False
+
+
+def test_com_within_tolerance_both_none():
+    """Missing COM on both sides should be treated as a match."""
+    assert _com_within_tolerance(None, None, 0.1) is True
+
+
 def test_compare_identical_trees_is_match(box_cylinder_step):
     """Comparing identical trees should produce only match statuses."""
     tree_a = parse_step(box_cylinder_step)
     tree_b = parse_step(box_cylinder_step)
     diff = compare_nodes(tree_a, tree_b)
     assert diff.status == "match"
+    assert diff.path_id == tree_a.path_id
     assert all(c.status == "match" for c in diff.children)
 
 
@@ -179,6 +227,29 @@ def test_compare_added_node(box_cylinder_step, tmp_path):
     assert plate_diff.status == "added"
     assert plate_diff.volume_a is None
     assert plate_diff.volume_b == pytest.approx(30 * 30 * 2)
+
+
+def test_compare_removed_node(box_cylinder_step, tmp_path):
+    """A part present only in file A should be marked as removed."""
+    box = cq.Workplane("XY").box(10, 20, 5)
+    cyl = cq.Workplane("XY").cylinder(15, 3)
+    plate = cq.Workplane("XY").box(30, 30, 2)
+
+    assy = cq.Assembly(name="TestAssembly")
+    assy.add(box, name="Box1", loc=cq.Location(cq.Vector(0, 0, 0)))
+    assy.add(cyl, name="Cylinder1", loc=cq.Location(cq.Vector(20, 0, 0)))
+    assy.add(plate, name="Plate1", loc=cq.Location(cq.Vector(0, 0, -10)))
+    path_a = tmp_path / "with_plate.stp"
+    assy.save(str(path_a), exportType="STEP")
+
+    tree_a = parse_step(str(path_a))
+    tree_b = parse_step(box_cylinder_step)
+    diff = compare_nodes(tree_a, tree_b)
+
+    plate_diff = next(c for c in diff.children if c.name.startswith("Plate1"))
+    assert plate_diff.status == "removed"
+    assert plate_diff.volume_b is None
+    assert plate_diff.volume_a == pytest.approx(30 * 30 * 2)
 
 
 def test_compare_changed_volume_exceeds_tolerance(box_cylinder_step, tmp_path):

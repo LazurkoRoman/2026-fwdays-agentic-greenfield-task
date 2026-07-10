@@ -10,6 +10,7 @@ cli.py — порівнює два STEP-файли (.stp/.step) і генеру�
 
 import argparse
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -42,6 +43,11 @@ def main():
     parser.add_argument("--com-tol", type=_non_negative_finite_float, default=0.1, help="COM tolerance, mm (default 0.1 mm)")
     parser.add_argument("--lang", choices=["uk", "en", "da"], default="uk", help="UI language")
     parser.add_argument("--json", action="store_true", help="Also print diff tree as JSON to stdout")
+    parser.add_argument(
+        "--assets-dir",
+        default=None,
+        help="Directory for STL/PNG previews (enables 3D viewer in the HTML report)",
+    )
     args = parser.parse_args()
     lang = normalize_lang(args.lang)
     status_out = sys.stderr if args.json else sys.stdout
@@ -49,16 +55,31 @@ def main():
     def status(msg: str) -> None:
         print(msg, file=status_out)
 
+    assets_dir = None
+    stl_base_url = None
+    if args.assets_dir:
+        assets_dir = Path(args.assets_dir)
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        output_parent = Path(args.output).resolve().parent
+        stl_base_url = os.path.relpath(assets_dir.resolve(), output_parent).replace("\\", "/") + "/"
+
     status(f"{tr(lang, 'cli_reading')} {args.file_a} ...")
-    tree_a = parse_step(args.file_a)
+    tree_a = parse_step(args.file_a, stl_dir=str(assets_dir) if assets_dir else None)
     status(f"{tr(lang, 'cli_reading')} {args.file_b} ...")
-    tree_b = parse_step(args.file_b)
+    tree_b = parse_step(args.file_b, stl_dir=str(assets_dir) if assets_dir else None)
 
     status(f"{tr(lang, 'cli_comparing')} ...")
     diff = compare_nodes(tree_a, tree_b, volume_tol_pct=args.volume_tol, com_tol_mm=args.com_tol)
 
-    html_report = render_report(diff, Path(args.file_a).name, Path(args.file_b).name,
-                                tree_a=tree_a, tree_b=tree_b, lang=lang)
+    html_report = render_report(
+        diff,
+        Path(args.file_a).name,
+        Path(args.file_b).name,
+        tree_a=tree_a,
+        tree_b=tree_b,
+        stl_base_url=stl_base_url,
+        lang=lang,
+    )
     Path(args.output).write_text(html_report, encoding="utf-8")
     status(f"{tr(lang, 'cli_saved')} {args.output}")
 

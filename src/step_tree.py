@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import os
 import struct
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote, unquote
 
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -48,12 +50,15 @@ try:
 except ImportError:
     _STL_AVAILABLE = False
 
+logger = logging.getLogger(__name__)
+
 
 @dataclasses.dataclass
 class Node:
     """Represents one STEP assembly-tree node with computed geometry properties."""
     name: str
     is_assembly: bool
+    path_id: str = "/"
     volume: Optional[float] = None          # мм^3 (одиниці STEP-файлу)
     com: Optional[tuple] = None             # (x, y, z) центр ваги
     bbox: Optional[tuple] = None            # (xmin, ymin, zmin, xmax, ymax, zmax)
@@ -65,12 +70,76 @@ class Node:
         return {
             "name": self.name,
             "is_assembly": self.is_assembly,
+            "path_id": self.path_id,
             "volume": self.volume,
             "com": self.com,
             "bbox": self.bbox,
             "stl_id": self.stl_id,
             "children": [c.to_dict() for c in self.children],
         }
+
+
+def _path_segment(name: str) -> str:
+    """Sanitize a node label for use inside a stable path identifier."""
+    return name.replace("/", "_").replace("\\", "_")
+
+
+def build_path_id(parent_path_id: str, segment: str) -> str:
+    """Build a stable hierarchical path id from parent path and node segment."""
+    segment = _path_segment(segment)
+    if parent_path_id:
+        return f"{parent_path_id}/{segment}"
+    return f"/{segment}"
+
+
+def encode_path_id(path_id: str) -> str:
+    """Encode a path id as a single URL/filesystem-safe segment."""
+    flattened = path_id.strip("/").replace("/", "__")
+    return quote(flattened, safe="-_.")
+
+
+def decode_path_id(encoded: str) -> str:
+    """Decode a path id produced by encode_path_id."""
+    if not encoded:
+        return "/"
+    flattened = unquote(encoded)
+    return "/" + flattened.replace("__", "/")
+
+
+def find_node_by_path_id(root: Node, path_id: str) -> Optional[Node]:
+    """Return the first node in the tree with the given path_id."""
+    if root.path_id == path_id:
+        return root
+    for child in root.children:
+        found = find_node_by_path_id(child, path_id)
+        if found is not None:
+            return found
+    return None
+
+
+def export_shape_assets(shape: TopoDS_Shape, title: str, stl_dir: str, basename: str) -> Optional[str]:
+    """Export STL and PNG files for a shape; return the STL filename on success."""
+    stl_path = os.path.join(stl_dir, basename + ".stl")
+    png_path = os.path.join(stl_dir, basename + ".png")
+    if _export_stl(shape, stl_path):
+        _export_png_from_stl(stl_path, png_path, title=title)
+        return basename + ".stl"
+    return None
+
+
+def ensure_lazy_assets(path_id: str, holder: dict, stl_dir: str) -> Optional[str]:
+    """Generate cached STL/PNG assets on demand for a parsed node path."""
+    shape_cache = holder.get("shape_cache", {})
+    entry = shape_cache.get(path_id)
+    if not entry:
+        return None
+    basename = encode_path_id(path_id)
+    stl_name = basename + ".stl"
+    stl_path = os.path.join(stl_dir, stl_name)
+    png_path = os.path.join(stl_dir, basename + ".png")
+    if os.path.isfile(stl_path) and os.path.isfile(png_path):
+        return stl_name
+    return export_shape_assets(entry["shape"], entry["title"], stl_dir, basename)
 
 
 def _label_name(label: TDF_Label, fallback: str) -> str:
@@ -107,7 +176,8 @@ def _export_stl(shape: TopoDS_Shape, path: str, deflection: float = 0.1) -> bool
         mesh.Perform()
         writer = StlAPI_Writer()
         return bool(writer.Write(shape, path))
-    except Exception:
+    except Exception as exc:
+        logger.warning("STL export failed for %s: %s", path, exc)
         return False
 
 
@@ -198,11 +268,13 @@ def _export_png_from_stl(stl_path: str, png_path: str, title: str = "Preview") -
         ax.set_axis_off()
         fig.savefig(png_path, bbox_inches="tight", pad_inches=0.0)
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning("PNG preview failed for %s: %s", png_path, exc)
         try:
             _write_placeholder_png(png_path, title=title)
             return True
-        except Exception:
+        except Exception as placeholder_exc:
+            logger.warning("PNG placeholder failed for %s: %s", png_path, placeholder_exc)
             return False
 
 
@@ -221,8 +293,10 @@ def _resolve_referred(shape_tool, comp_label):
 
 
 def _walk(shape_tool, label: TDF_Label, seen_names: dict,
+          parent_path_id: str = "",
           shape_label_for_geometry: TDF_Label = None,
-          stl_dir: str = None) -> Node:
+          stl_dir: str = None,
+          shape_cache: dict = None) -> Node:
     """
     label: мітка структури (визначає is_assembly / дітей) — це "referred"/part label.
     shape_label_for_geometry: мітка КОМПОНЕНТА (інстанса), з якої треба брати
@@ -239,13 +313,21 @@ def _walk(shape_tool, label: TDF_Label, seen_names: dict,
     display_name = name if count == 0 else f"{name} #{count + 1}"
 
     is_assembly_flag = shape_tool.IsAssembly_s(label)
-    node = Node(name=display_name, is_assembly=bool(is_assembly_flag))
+    path_id = build_path_id(parent_path_id, display_name)
+    node = Node(name=display_name, is_assembly=bool(is_assembly_flag), path_id=path_id)
 
     if is_assembly_flag:
         for comp_label in _get_components(shape_tool, label):
             ref_label = _resolve_referred(shape_tool, comp_label)
-            child_node = _walk(shape_tool, ref_label, seen_names,
-                               shape_label_for_geometry=comp_label, stl_dir=stl_dir)
+            child_node = _walk(
+                shape_tool,
+                ref_label,
+                seen_names,
+                parent_path_id=path_id,
+                shape_label_for_geometry=comp_label,
+                stl_dir=stl_dir,
+                shape_cache=shape_cache,
+            )
             node.children.append(child_node)
         assy_shape = shape_tool.GetShape_s(geom_label)
 
@@ -266,13 +348,16 @@ def _walk(shape_tool, label: TDF_Label, seen_names: dict,
                 node.volume = round(total_vol, 6)
                 node.com = (round(wx, 4), round(wy, 4), round(wz, 4))
 
-        if stl_dir and assy_shape is not None and not assy_shape.IsNull():
-            asset_id = uuid.uuid4().hex
-            stl_path = os.path.join(stl_dir, asset_id + ".stl")
-            png_path = os.path.join(stl_dir, asset_id + ".png")
-            if _export_stl(assy_shape, stl_path):
-                _export_png_from_stl(stl_path, png_path, title=display_name)
-                node.stl_id = asset_id + ".stl"
+        if assy_shape is not None and not assy_shape.IsNull():
+            if shape_cache is not None:
+                shape_cache[path_id] = {"shape": assy_shape, "title": display_name}
+            if stl_dir and shape_cache is None:
+                asset_id = uuid.uuid4().hex
+                stl_path = os.path.join(stl_dir, asset_id + ".stl")
+                png_path = os.path.join(stl_dir, asset_id + ".png")
+                if _export_stl(assy_shape, stl_path):
+                    _export_png_from_stl(stl_path, png_path, title=display_name)
+                    node.stl_id = asset_id + ".stl"
     else:
         shape = shape_tool.GetShape_s(geom_label)
         if shape is not None and not shape.IsNull():
@@ -280,7 +365,9 @@ def _walk(shape_tool, label: TDF_Label, seen_names: dict,
             node.volume = volume
             node.com = com
             node.bbox = bbox
-            if stl_dir:
+            if shape_cache is not None:
+                shape_cache[path_id] = {"shape": shape, "title": display_name}
+            if stl_dir and shape_cache is None:
                 asset_id = uuid.uuid4().hex
                 stl_path = os.path.join(stl_dir, asset_id + ".stl")
                 png_path = os.path.join(stl_dir, asset_id + ".png")
@@ -291,7 +378,7 @@ def _walk(shape_tool, label: TDF_Label, seen_names: dict,
     return node
 
 
-def parse_step(path: str, stl_dir: str = None) -> Node:
+def parse_step(path: str, stl_dir: str = None, holder: dict = None) -> Node:
     """Парсить STEP-файл і повертає корінь дерева елементів."""
     path = str(Path(path).resolve())
 
@@ -307,20 +394,40 @@ def parse_step(path: str, stl_dir: str = None) -> Node:
     reader.Transfer(doc)
 
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    shape_cache = None
+    if holder is not None:
+        holder["doc"] = doc
+        holder["shape_cache"] = {}
+        shape_cache = holder["shape_cache"]
 
     free_labels = TDF_LabelSequence()
     getter = shape_tool.GetFreeShapes_s if hasattr(shape_tool, "GetFreeShapes_s") else shape_tool.GetFreeShapes
     getter(free_labels)
 
     seen_names: dict = {}
-    roots = [_walk(shape_tool, free_labels.Value(i), seen_names, stl_dir=stl_dir)
-             for i in range(1, free_labels.Length() + 1)]
+    virtual_root_path = build_path_id("", Path(path).stem)
+    roots = [
+        _walk(
+            shape_tool,
+            free_labels.Value(i),
+            seen_names,
+            parent_path_id=virtual_root_path if free_labels.Length() > 1 else "",
+            stl_dir=stl_dir,
+            shape_cache=shape_cache,
+        )
+        for i in range(1, free_labels.Length() + 1)
+    ]
 
     if len(roots) == 1:
         return roots[0]
 
     # якщо кілька незалежних верхніх тіл — обгортаємо у віртуальний корінь
-    root = Node(name=Path(path).stem, is_assembly=True, children=roots)
+    root = Node(
+        name=Path(path).stem,
+        is_assembly=True,
+        path_id=virtual_root_path,
+        children=roots,
+    )
     total_vol = sum(c.volume for c in roots if c.volume)
     if total_vol:
         wx = sum((c.com[0] * c.volume) for c in roots if c.volume) / total_vol

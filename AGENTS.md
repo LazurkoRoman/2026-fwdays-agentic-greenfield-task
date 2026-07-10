@@ -4,16 +4,20 @@ Context document for any AI agent (Claude Code, Copilot, Cursor, etc.) working i
 
 ## What This Project Is
 
-STEP file comparison service (CAD, .stp/.step) at the assembly-tree level. For each part/subassembly, the volume and center of mass are computed. Two files are compared node-to-node by name, and the result is a color-coded HTML report (green/yellow/blue/red = match/changed/added/removed).
+STEP file comparison service (CAD, .stp/.step) at the assembly-tree level. For each part/subassembly, the volume and center of mass are computed. Two files are compared node-to-node by stable hierarchical `path_id`, and the result is a color-coded HTML report (green/yellow/blue/red = match/changed/added/removed).
 
 ## Architecture
 
 ```
-cli.py                 - entry point, command-line arguments
+cli.py                 - CLI entry point, command-line arguments
+app.py                 - Flask web app with cached sessions and lazy assets
+wsgi.py                - Waitress production entry point
+templates/             - Jinja2 upload/error pages
 src/step_tree.py       - STEP -> tree (Node): parsing via OCP (OpenCASCADE) XCAF
-src/compare.py         - Node + Node -> DiffNode: compare two trees
-src/report.py          - DiffNode -> HTML
+src/compare.py         - Node + Node -> DiffNode: compare two trees by path_id
+src/report.py          - DiffNode -> HTML (3-panel view, STL/PNG viewer, theme toggle)
 tests/test_geometry.py - unit tests with analytical geometry references
+tests/test_app.py      - Flask upload/report/lazy asset smoke tests
 ```
 
 Critical detail every agent MUST know before changing `step_tree.py`: volume and center of mass must be computed from the component instance shape, not the referred part label. Otherwise the assembly placement transform (`TopLoc_Location`) is not applied and every part reports a center of mass as if it were at the origin. This was already found and fixed once (see regression test `test_cylinder_center_of_mass_reflects_assembly_location`). Do not revert that logic without updating the test.
@@ -34,6 +38,7 @@ Cycle artifacts in the repository:
 
 - current state / context: `docs/current-state.md`
 - pre-code specification: `docs/spec-template.md` (copy for each feature)
+- latest completed slice spec: `docs/spec-ui-theme-activation.md`
 - technical rules and traps: this file `AGENTS.md`
 
 ### 1. Context Engineering (this file)
@@ -73,12 +78,39 @@ If a review remark cannot be fixed, leave a short justification for why the risk
 
 `compare.py` accepts `volume_tol_pct` and `com_tol_mm` as tolerances under which a difference is considered measurement/export noise rather than a real geometry change. This is a documented contract, not a magic constant. Keep it stable during refactors.
 
+Missing volume or center-of-mass on **both** sides is treated as a match for that measurement. Missing data on only one side is treated as a real difference.
+
+### 6. Web Session Cache and Lazy Assets
+
+`app.py` parses uploaded STEP files once in `/compare` and stores `tree_a`, `tree_b`, `diff`, plus OCP shape holders in the in-memory session. `/report/<sid>` must re-render HTML only.
+
+Web previews are lazy: `/asset/<sid>/<side>/<encoded_path>.{stl,png}` generates files on first request. Do not eagerly export all node assets during `/compare`.
+
+CLI reports need `--assets-dir` for eager local STL/PNG output in standalone HTML.
+
+### 7. Compare Matching Uses `path_id`
+
+Child nodes are matched by stable hierarchical `path_id`, not by display name alone. Renaming a part still produces removed+added because the path segment changes.
+
+### 8. Production Serving
+
+Use `python wsgi.py` (Waitress) for non-development serving. `python app.py` remains acceptable for local debugging only.
+
+### 9. Report UI Behavior Contract
+
+- Report page supports light/dark theme toggle.
+- Theme preference is stored in browser localStorage (`reportTheme`).
+- Both node name and node preview thumbnail activate the selected element in viewer.
+- Viewer metadata must display STL URL and render PNG fallback when preview load fails.
+
 ## How to Verify a Change Before Commit
 
 ```bash
 pip install -r requirements.txt --break-system-packages
 pytest tests/ -v
 python3 cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o /tmp/report.html
+python3 cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o /tmp/report.html --assets-dir /tmp/report_assets
+python wsgi.py
 ```
 
 If the tests fail, the change is not ready, regardless of how logically correct it seems.

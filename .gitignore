@@ -9,7 +9,9 @@ venv/
 dist/
 build/
 tmp/
+logs/
 *.stl
 *.png
 *.html
 !tests/fixtures/*.html
+!templates/*.html

@@ -19,6 +19,7 @@ from typing import Optional
 
 from compare import DiffNode
 from i18n import available_languages, normalize_lang, tr
+from step_tree import encode_path_id
 
 COLORS = {
     "match": "#2e7d32",
@@ -26,6 +27,11 @@ COLORS = {
     "added": "#1565c0",
     "removed": "#c62828",
 }
+
+
+def _json_for_script(payload: dict) -> str:
+    """Serialize JSON for safe embedding inside an HTML <script> tag."""
+    return json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
 
 def _status_label(lang: str, status: str) -> str:
     """Return localized status label for a diff state."""
@@ -57,6 +63,18 @@ _CSS = """
     --brand-a: #355f84;
     --brand-b: #4b6a55;
     --viewer-bg: #d2d5dc;
+}
+
+body[data-theme="dark"] {
+    --bg: #151820;
+    --panel: #202632;
+    --head: #2a3242;
+    --line: #3a465d;
+    --text: #e9eef8;
+    --muted: #9cacbf;
+    --brand-a: #8bc2ff;
+    --brand-b: #97d7ad;
+    --viewer-bg: #121722;
 }
 
 * { box-sizing: border-box; }
@@ -175,6 +193,13 @@ h1 { margin: 0 0 8px; font-size: 20px; font-weight: 700; letter-spacing: .01em; 
 .stl-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .stl-link:hover { color: #1a4f78; }
 .name.active-node { color: #1a4f78; }
+.stl-thumb { cursor: pointer; }
+.stl-thumb.active-node { outline: 2px solid #5aa0df; outline-offset: 1px; }
+
+body[data-theme="dark"] .stl-link:hover,
+body[data-theme="dark"] .name.active-node {
+    color: #8bc2ff;
+}
 
 .badge {
     margin-left: auto;
@@ -231,6 +256,12 @@ h1 { margin: 0 0 8px; font-size: 20px; font-weight: 700; letter-spacing: .01em; 
     padding: 5px 9px;
     font-size: 11px;
     cursor: pointer;
+}
+
+body[data-theme="dark"] .viewer-btn {
+    background: #263247;
+    color: #e9eef8;
+    border-color: #536381;
 }
 
 .viewer-main {
@@ -411,19 +442,31 @@ function initViewer() {
 }
 
 window.selectElementFrom = function (el) {
-    var url = el.getAttribute('data-stl-url');
-    var pngUrl = el.getAttribute('data-png-url');
-    var title = el.getAttribute('data-stl-title') || ((window.I18N && window.I18N.preview_title) || 'Element');
+    var target = el;
+    if (!target || !target.getAttribute('data-stl-url')) {
+        target = el.closest('[data-stl-url]');
+    }
+    if (!target) return;
+
+    var url = target.getAttribute('data-stl-url');
+    var pngUrl = target.getAttribute('data-png-url');
+    var title = target.getAttribute('data-stl-title') || ((window.I18N && window.I18N.preview_title) || 'Element');
     if (!url) return;
 
-    document.querySelectorAll('.name.active-node').forEach(function (n) { n.classList.remove('active-node'); });
-    el.classList.add('active-node');
+    document.querySelectorAll('.name.active-node, .stl-thumb.active-node').forEach(function (n) { n.classList.remove('active-node'); });
+    if (target.classList.contains('name') || target.classList.contains('stl-thumb')) {
+        target.classList.add('active-node');
+    }
 
-        var viewerThumb = document.getElementById('viewer-thumb');
-        viewerThumb.src = pngUrl || viewerThumb.getAttribute('data-fallback');
+    var viewerThumb = document.getElementById('viewer-thumb');
+    viewerThumb.onerror = function () {
+        this.onerror = null;
+        this.src = this.getAttribute('data-fallback');
+    };
+    viewerThumb.src = pngUrl || viewerThumb.getAttribute('data-fallback');
 
     document.getElementById('viewer-meta-name').textContent = title;
-    document.getElementById('viewer-meta-url').textContent = pngUrl || url;
+    document.getElementById('viewer-meta-url').textContent = url;
     document.getElementById('viewer-title').textContent = title;
     document.getElementById('viewer-msg').style.display = 'flex';
     document.getElementById('viewer-msg').innerHTML = '<span class="spinner"></span>' + (((window.I18N && window.I18N.viewer_loading) || 'Loading STL...'));
@@ -467,7 +510,7 @@ window.clearViewer = function () {
         mesh.material.dispose();
         mesh = null;
     }
-    document.querySelectorAll('.name.active-node').forEach(function (n) { n.classList.remove('active-node'); });
+    document.querySelectorAll('.name.active-node, .stl-thumb.active-node').forEach(function (n) { n.classList.remove('active-node'); });
     document.getElementById('viewer-title').textContent = (window.I18N && window.I18N.viewer_title_none) || 'Current element: none';
         document.getElementById('viewer-thumb').src = document.getElementById('viewer-thumb').getAttribute('data-fallback');
     document.getElementById('viewer-meta-name').textContent = '—';
@@ -485,6 +528,32 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('viewer-thumb').src = (window.I18N && window.I18N.empty_preview) || document.getElementById('viewer-thumb').getAttribute('data-fallback');
     initViewer();
 });
+
+function applyTheme(theme) {
+    var root = document.body;
+    var toggle = document.getElementById('theme-toggle');
+    if (!root || !toggle) return;
+
+    var resolved = theme === 'dark' ? 'dark' : 'light';
+    root.setAttribute('data-theme', resolved);
+
+    if (window.I18N) {
+        var text = resolved === 'dark' ? (window.I18N.theme_light || 'Light') : (window.I18N.theme_dark || 'Dark');
+        toggle.textContent = text;
+    }
+}
+
+window.toggleTheme = function () {
+    var current = document.body.getAttribute('data-theme') || 'light';
+    var next = current === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('reportTheme', next);
+    applyTheme(next);
+};
+
+document.addEventListener('DOMContentLoaded', function () {
+    var saved = localStorage.getItem('reportTheme') || 'light';
+    applyTheme(saved);
+});
 """
 
 
@@ -493,9 +562,29 @@ def _fmt(v):
     return "—" if v is None else v
 
 
+def _node_has_geometry(node) -> bool:
+    """Return True when a node has enough geometry metadata for preview export."""
+    return node.volume is not None or node.bbox is not None
+
+
+def _lazy_asset_urls(asset_sid: str, side: str, path_id: str) -> tuple[str, str]:
+    """Build lazy STL/PNG URLs for a node path within a web session."""
+    encoded = encode_path_id(path_id)
+    base = f"/asset/{asset_sid}/{side}/{encoded}"
+    return f"{base}.stl", f"{base}.png"
+
+
 # ---------- Plain Node renderer ----------
 
-def _render_plain_node(node, depth: int, ctr: list, stl_base_url: str = None, lang: str = "uk") -> str:
+def _render_plain_node(
+    node,
+    depth: int,
+    ctr: list,
+    stl_base_url: str = None,
+    lang: str = "uk",
+    asset_sid: str = None,
+    asset_side: str = None,
+) -> str:
     """Render one plain tree node (A or B side) recursively as HTML."""
     ctr[0] += 1
     uid = f"p{ctr[0]}"
@@ -506,22 +595,38 @@ def _render_plain_node(node, depth: int, ctr: list, stl_base_url: str = None, la
 
     header_cls = "node-header has-children" if has_ch else "node-header"
     name_esc = html.escape(node.name)
+    preview_alt = html.escape(tr(lang, "preview_title"), quote=True)
+    open_title = html.escape(tr(lang, "open_selected_element"), quote=True)
+    fallback = html.escape(_empty_preview(lang), quote=True)
+    onerror_js = "this.onerror=null;this.src=this.dataset.fallback"
 
-    if stl_base_url and node.stl_id:
+    if asset_sid and asset_side and node.path_id and _node_has_geometry(node):
+        stl_url_raw, png_url_raw = _lazy_asset_urls(asset_sid, asset_side, node.path_id)
+        stl_url = html.escape(stl_url_raw, quote=True)
+        png_url = html.escape(png_url_raw, quote=True)
+        thumb_html = (
+            f'<img class="thumb stl-thumb" src="{png_url}" loading="lazy" '
+            f'data-stl-url="{stl_url}" data-png-url="{png_url}" data-fallback="{fallback}" '
+            f'data-stl-title="{name_esc}" alt="{preview_alt}" onerror="{onerror_js}" onclick="selectElementFrom(this)">'
+        )
+        name_html = (f'<span class="name stl-link" title="{open_title} ({name_esc})" '
+                     f'data-stl-url="{stl_url}" data-png-url="{png_url}" data-stl-title="{name_esc}" '
+                     f'onclick="selectElementFrom(this)">{name_esc}</span>')
+    elif stl_base_url and node.stl_id:
         stl_url_raw = stl_base_url + node.stl_id
         png_url_raw = stl_url_raw[:-4] + ".png"
-        stl_url = html.escape(stl_url_raw)
-        png_url = html.escape(png_url_raw)
+        stl_url = html.escape(stl_url_raw, quote=True)
+        png_url = html.escape(png_url_raw, quote=True)
         thumb_html = (
             f'<img class="thumb stl-thumb" src="{png_url}" '
-            f'data-stl-url="{stl_url}" data-png-url="{png_url}" '
-            f'alt="{tr(lang, "preview_title")}" onerror="this.onerror=null;this.src=\'{_empty_preview(lang)}\';">'
+            f'data-stl-url="{stl_url}" data-png-url="{png_url}" data-fallback="{fallback}" '
+            f'data-stl-title="{name_esc}" alt="{preview_alt}" onerror="{onerror_js}" onclick="selectElementFrom(this)">'
         )
-        name_html = (f'<span class="name stl-link" title="{tr(lang, "open_selected_element")} ({name_esc})" '
+        name_html = (f'<span class="name stl-link" title="{open_title} ({name_esc})" '
                      f'data-stl-url="{stl_url}" data-png-url="{png_url}" data-stl-title="{name_esc}" '
                      f'onclick="selectElementFrom(this)">{name_esc}</span>')
     else:
-        thumb_html = f'<img class="thumb" alt="{tr(lang, "preview_unavailable")}">'
+        thumb_html = f'<img class="thumb" alt="{html.escape(tr(lang, "preview_unavailable"), quote=True)}">'
         name_html = f'<span class="name" title="{name_esc}">{name_esc}</span>'
 
     vol_str = f'<span class="plain-vol">V={node.volume}</span>' if node.volume is not None else ""
@@ -530,7 +635,18 @@ def _render_plain_node(node, depth: int, ctr: list, stl_base_url: str = None, la
 
     children_html = ""
     if has_ch:
-        inner = "".join(_render_plain_node(c, depth + 1, ctr, stl_base_url, lang=lang) for c in node.children)
+        inner = "".join(
+            _render_plain_node(
+                c,
+                depth + 1,
+                ctr,
+                stl_base_url,
+                lang=lang,
+                asset_sid=asset_sid,
+                asset_side=asset_side,
+            )
+            for c in node.children
+        )
         children_html = f'<div class="children" id="{uid}-ch">{inner}</div>'
 
     indent = depth * 18
@@ -604,11 +720,13 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
                                     stl_base_url: str = None,
                                     lang: str = "uk",
                                     lang_switch_url_template: str = "/?lang={code}",
-                                    back_url: str = None) -> str:
+                                    back_url: str = None,
+                                    asset_sid: str = None) -> str:
     """Build a full localized HTML report with A/B trees, diff panel, and 3D viewer."""
     lang = normalize_lang(lang)
     total = _count(root)
     empty_preview = _empty_preview(lang)
+    empty_preview_attr = html.escape(empty_preview, quote=True)
     i18n_payload = {
         "viewer_engine_missing": tr(lang, "viewer_engine_missing"),
         "viewer_loading": tr(lang, "viewer_loading"),
@@ -617,6 +735,8 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
         "viewer_choose": tr(lang, "viewer_choose"),
         "viewer_browser_unsupported": tr(lang, "viewer_browser_unsupported"),
         "empty_preview": empty_preview,
+        "theme_dark": tr(lang, "theme_dark"),
+        "theme_light": tr(lang, "theme_light"),
     }
     lang_links = " | ".join(
         f'<a href="{html.escape(lang_switch_url_template.format(code=code))}">{tr(code, "language_label")}</a>'
@@ -637,8 +757,8 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
     diff_html = _render_diff_node(root, 0, [0], lang=lang)
 
     if tree_a is not None and tree_b is not None:
-        plain_a = _render_plain_node(tree_a, 0, [0], stl_base_url, lang=lang)
-        plain_b = _render_plain_node(tree_b, 0, [0], stl_base_url, lang=lang)
+        plain_a = _render_plain_node(tree_a, 0, [0], stl_base_url, lang=lang, asset_sid=asset_sid, asset_side="a")
+        plain_b = _render_plain_node(tree_b, 0, [0], stl_base_url, lang=lang, asset_sid=asset_sid, asset_side="b")
         body = f"""
 <div class="panels">
     <div class="panel">
@@ -658,10 +778,11 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
         body = f'<div class="panel-body">{diff_html}</div>'
 
     html_report = f"""<!DOCTYPE html>
-<html lang="{lang}">
+<html lang="{lang}" translate="no">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate">
 <title>{tr(lang, 'compare_title')} — {html.escape(title_a)} vs {html.escape(title_b)}</title>
 <style>{_CSS}</style>
 </head>
@@ -671,6 +792,7 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
             <h1>{tr(lang, 'compare_title')}</h1>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:#5b574d;">
+                <button id="theme-toggle" class="viewer-btn" onclick="toggleTheme()">{tr(lang, 'theme_dark')}</button>
                 <a href="{html.escape(back_url)}" style="text-decoration:none;border:1px solid #b9b09a;padding:4px 9px;border-radius:999px;background:#efecdf;color:#2b2b2b;">← {tr(lang, 'error_back')}</a>
                 <div>{tr(lang, 'report_language_label')}: {lang_links}</div>
             </div>
@@ -694,7 +816,7 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
                                 <div class="viewer-side">
                                         <div class="viewer-side-head">{tr(lang, 'viewer_side_head')}</div>
                                         <div class="viewer-side-body">
-                                                <img id="viewer-thumb" src="{empty_preview}" data-fallback="{empty_preview}" alt="{tr(lang, 'preview_title')}">
+                                                <img id="viewer-thumb" src="{empty_preview_attr}" data-fallback="{empty_preview_attr}" alt="{html.escape(tr(lang, 'preview_title'), quote=True)}">
                                                 <div class="viewer-meta">
                                                         <div><b>{tr(lang, 'viewer_meta_name')}:</b> <span id="viewer-meta-name">—</span></div>
                                                         <div><b>{tr(lang, 'viewer_meta_stl')}:</b> <span id="viewer-meta-url">—</span></div>
@@ -710,7 +832,7 @@ def render_report(root: DiffNode, title_a: str, title_b: str,
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/STLLoader.js" integrity="sha384-QF8EmP6pyNE+i7WmcltzC4ddzFVKDxfn5WD5gXyKTSE4SCw0R25TI+q0LUlnf7tq" crossorigin="anonymous"></script>
-<script>window.I18N = {json.dumps(i18n_payload, ensure_ascii=False)};</script>
+<script>window.I18N = {_json_for_script(i18n_payload)};</script>
 <script>{_THREE_SCRIPT}</script>
 <script>{_JS}</script>
 </body>
