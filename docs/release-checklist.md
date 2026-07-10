@@ -11,7 +11,7 @@ Use this checklist before pushing the final submission update.
 
 ## Code And Behavior
 
-- [ ] `\.venv\Scripts\python.exe -m pytest -q` passes.
+- [ ] `.venv\Scripts\python.exe -m pytest tests/ -v` passes.
 - [ ] CLI smoke run works:
   - `python cli.py tests/fixtures/sample_a.stp tests/fixtures/sample_b.stp -o report.html`
 - [ ] Web app opens locally:

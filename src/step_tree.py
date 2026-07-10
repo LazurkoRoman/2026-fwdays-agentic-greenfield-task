@@ -92,18 +92,23 @@ def build_path_id(parent_path_id: str, segment: str) -> str:
     return f"/{segment}"
 
 
+_PATH_ID_SEGMENT_DELIM = "~"
+
+
 def encode_path_id(path_id: str) -> str:
     """Encode a path id as a single URL/filesystem-safe segment."""
-    flattened = path_id.strip("/").replace("/", "__")
-    return quote(flattened, safe="-_.")
+    segments = [segment for segment in path_id.strip("/").split("/") if segment]
+    if not segments:
+        return ""
+    return _PATH_ID_SEGMENT_DELIM.join(quote(segment, safe="-_.") for segment in segments)
 
 
 def decode_path_id(encoded: str) -> str:
     """Decode a path id produced by encode_path_id."""
     if not encoded:
         return "/"
-    flattened = unquote(encoded)
-    return "/" + flattened.replace("__", "/")
+    segments = [unquote(segment) for segment in encoded.split(_PATH_ID_SEGMENT_DELIM)]
+    return "/" + "/".join(segments)
 
 
 def find_node_by_path_id(root: Node, path_id: str) -> Optional[Node]:
@@ -139,7 +144,11 @@ def ensure_lazy_assets(path_id: str, holder: dict, stl_dir: str) -> Optional[str
     png_path = os.path.join(stl_dir, basename + ".png")
     if os.path.isfile(stl_path) and os.path.isfile(png_path):
         return stl_name
-    return export_shape_assets(entry["shape"], entry["title"], stl_dir, basename)
+    try:
+        return export_shape_assets(entry["shape"], entry["title"], stl_dir, basename)
+    except OSError as exc:
+        logger.warning("Lazy asset export failed for %s: %s", path_id, exc)
+        return None
 
 
 def _label_name(label: TDF_Label, fallback: str) -> str:
@@ -165,6 +174,20 @@ def _shape_props(shape: TopoDS_Shape):
     bbox_t = tuple(round(v, 4) for v in (xmin, ymin, zmin, xmax, ymax, zmax))
 
     return round(volume, 6), com, bbox_t
+
+
+def _aggregate_bbox_from_children(children: list) -> Optional[tuple]:
+    """Return an axis-aligned union bbox from child nodes that have bbox data."""
+    bboxes = [child.bbox for child in children if child.bbox]
+    if not bboxes:
+        return None
+    xmin = min(bbox[0] for bbox in bboxes)
+    ymin = min(bbox[1] for bbox in bboxes)
+    zmin = min(bbox[2] for bbox in bboxes)
+    xmax = max(bbox[3] for bbox in bboxes)
+    ymax = max(bbox[4] for bbox in bboxes)
+    zmax = max(bbox[5] for bbox in bboxes)
+    return tuple(round(value, 4) for value in (xmin, ymin, zmin, xmax, ymax, zmax))
 
 
 def _export_stl(shape: TopoDS_Shape, path: str, deflection: float = 0.1) -> bool:
@@ -340,6 +363,9 @@ def _walk(shape_tool, label: TDF_Label, seen_names: dict,
             node.com = com
             node.bbox = bbox
         else:
+            merged_bbox = _aggregate_bbox_from_children(node.children)
+            if merged_bbox is not None:
+                node.bbox = merged_bbox
             total_vol = sum(c.volume for c in node.children if c.volume)
             if total_vol:
                 wx = sum((c.com[0] * c.volume) for c in node.children if c.volume) / total_vol

@@ -73,7 +73,7 @@
     <input type="hidden" name="lang" value="{{ lang }}">
     <div class="fields">
       <div>
-        <label>{{ tr('file_a_label') }}</label>
+        <label for="inp-a">{{ tr('file_a_label') }}</label>
         <div class="drop-zone" id="dz-a">
           <input type="file" name="file_a" accept=".stp,.step" required id="inp-a">
           <div class="drop-icon">📂</div>
@@ -81,7 +81,7 @@
         </div>
       </div>
       <div>
-        <label>{{ tr('file_b_label') }}</label>
+        <label for="inp-b">{{ tr('file_b_label') }}</label>
         <div class="drop-zone" id="dz-b">
           <input type="file" name="file_b" accept=".stp,.step" required id="inp-b">
           <div class="drop-icon">📂</div>
@@ -92,13 +92,13 @@
         <button type="button" class="advanced-toggle" onclick="toggleAdv()">▸ {{ tr('tolerance_toggle') }}</button>
         <div class="advanced" id="adv">
           <div class="input-group">
-            <label>{{ tr('volume_tol_label') }}</label>
-            <input type="number" name="volume_tol" value="0.5" min="0" step="0.1">
+            <label for="volume_tol">{{ tr('volume_tol_label') }}</label>
+            <input type="number" id="volume_tol" name="volume_tol" value="0.5" min="0" step="0.1">
             <span class="hint-text">{{ tr('volume_tol_hint') }}</span>
           </div>
           <div class="input-group">
-            <label>{{ tr('com_tol_label') }}</label>
-            <input type="number" name="com_tol" value="0.1" min="0" step="0.01">
+            <label for="com_tol">{{ tr('com_tol_label') }}</label>
+            <input type="number" id="com_tol" name="com_tol" value="0.1" min="0" step="0.01">
             <span class="hint-text">{{ tr('com_tol_hint') }}</span>
           </div>
         </div>

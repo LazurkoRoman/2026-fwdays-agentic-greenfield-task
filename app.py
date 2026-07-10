@@ -41,16 +41,36 @@ def _session_dir(session_value):
   return session_value
 
 
+def _touch_session(sid: str) -> None:
+  """Mark a session as recently used for LRU eviction."""
+  if sid in _sessions:
+    _sessions.move_to_end(sid)
+
+
+def _evict_old_sessions() -> None:
+  """Remove least-recently-used sessions above the configured limit."""
+  while len(_sessions) > _MAX_SESSIONS:
+    _, old_session = _sessions.popitem(last=False)
+    old_dir = _session_dir(old_session)
+    if old_dir:
+      shutil.rmtree(old_dir, ignore_errors=True)
+
+
 def _new_session() -> tuple:
   """Створює нову temp-директорію для сесії, повертає (sid, dir_path)."""
   sid = uuid.uuid4().hex
   tmpdir = tempfile.mkdtemp(prefix="stptree_")
   _sessions[sid] = {"dir": tmpdir}
-  while len(_sessions) > _MAX_SESSIONS:
-    _, old_session = _sessions.popitem(last=False)
-    old_dir = _session_dir(old_session)
-    shutil.rmtree(old_dir, ignore_errors=True)
+  _evict_old_sessions()
   return sid, tmpdir
+
+
+def _send_session_file(stl_dir: str, filename: str, mimetype: str):
+  """Serve a cached session file, returning a controlled 404 on filesystem errors."""
+  try:
+    return send_from_directory(stl_dir, filename, mimetype=mimetype)
+  except OSError:
+    return "", 404
 
 
 @app.template_global("tr")
@@ -87,6 +107,7 @@ def _render_error_page(lang: str, msg: str) -> str:
 
 def _render_session_report(sid: str, lang: str) -> Response:
   """Render a cached compare result; language switches do not re-parse STEP files."""
+  _touch_session(sid)
   session = _sessions.get(sid)
   stl_dir = _session_dir(session)
   if not stl_dir or not os.path.isdir(stl_dir):
@@ -145,6 +166,7 @@ def serve_lazy_asset(sid, side, encoded_path, ext):
   if side not in {"a", "b"} or ext not in {"stl", "png"}:
     return "", 400
 
+  _touch_session(sid)
   session = _sessions.get(sid)
   stl_dir = _session_dir(session)
   if not stl_dir or not isinstance(session, dict):
@@ -155,34 +177,44 @@ def serve_lazy_asset(sid, side, encoded_path, ext):
     return "", 404
 
   path_id = decode_path_id(encoded_path)
-  stl_name = ensure_lazy_assets(path_id, holder, stl_dir)
+  try:
+    stl_name = ensure_lazy_assets(path_id, holder, stl_dir)
+  except OSError:
+    return "", 404
   if not stl_name:
     return "", 404
 
   basename = stl_name[:-4]
   filename = f"{basename}.{ext}"
-  full = os.path.join(stl_dir, filename)
-  if not os.path.isfile(full):
+  try:
+    full = os.path.join(stl_dir, filename)
+    if not os.path.isfile(full):
+      return "", 404
+  except OSError:
     return "", 404
 
   mimetype = "image/png" if ext == "png" else "application/octet-stream"
-  return send_from_directory(stl_dir, filename, mimetype=mimetype)
+  return _send_session_file(stl_dir, filename, mimetype)
 
 
 @app.route("/stl/<sid>/<filename>")
 def serve_stl(sid, filename):
   """Serve legacy eager STL/PNG assets from the session cache directory."""
+  _touch_session(sid)
   stl_dir = _session_dir(_sessions.get(sid))
   if not stl_dir or not os.path.isdir(stl_dir):
     return "", 404
   safe = secure_filename(filename)
   if not safe or safe != filename or not (safe.endswith(".stl") or safe.endswith(".png")):
     return "", 400
-  full = os.path.join(stl_dir, safe)
-  if not os.path.isfile(full):
+  try:
+    full = os.path.join(stl_dir, safe)
+    if not os.path.isfile(full):
+      return "", 404
+  except OSError:
     return "", 404
   mimetype = "image/png" if safe.endswith(".png") else "application/octet-stream"
-  return send_from_directory(stl_dir, safe, mimetype=mimetype)
+  return _send_session_file(stl_dir, safe, mimetype)
 
 
 @app.route("/compare", methods=["POST"])
@@ -253,6 +285,7 @@ def compare():
 @app.route("/report/<sid>")
 def report_for_session(sid):
   """Render existing compare result for another language without re-upload."""
+  _touch_session(sid)
   lang = normalize_lang(request.args.get("lang"))
   try:
     return _render_session_report(sid, lang)

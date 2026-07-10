@@ -61,32 +61,46 @@ def main():
         assets_dir = Path(args.assets_dir)
         assets_dir.mkdir(parents=True, exist_ok=True)
         output_parent = Path(args.output).resolve().parent
-        stl_base_url = os.path.relpath(assets_dir.resolve(), output_parent).replace("\\", "/") + "/"
+        try:
+            rel = os.path.relpath(assets_dir.resolve(), output_parent)
+            stl_base_url = rel.replace("\\", "/") + "/"
+        except ValueError:
+            stl_base_url = assets_dir.resolve().as_posix() + "/"
 
-    status(f"{tr(lang, 'cli_reading')} {args.file_a} ...")
-    tree_a = parse_step(args.file_a, stl_dir=str(assets_dir) if assets_dir else None)
-    status(f"{tr(lang, 'cli_reading')} {args.file_b} ...")
-    tree_b = parse_step(args.file_b, stl_dir=str(assets_dir) if assets_dir else None)
+    try:
+        status(f"{tr(lang, 'cli_reading')} {args.file_a} ...")
+        tree_a = parse_step(args.file_a, stl_dir=str(assets_dir) if assets_dir else None)
+        status(f"{tr(lang, 'cli_reading')} {args.file_b} ...")
+        tree_b = parse_step(args.file_b, stl_dir=str(assets_dir) if assets_dir else None)
 
-    status(f"{tr(lang, 'cli_comparing')} ...")
-    diff = compare_nodes(tree_a, tree_b, volume_tol_pct=args.volume_tol, com_tol_mm=args.com_tol)
+        status(f"{tr(lang, 'cli_comparing')} ...")
+        diff = compare_nodes(tree_a, tree_b, volume_tol_pct=args.volume_tol, com_tol_mm=args.com_tol)
 
-    html_report = render_report(
-        diff,
-        Path(args.file_a).name,
-        Path(args.file_b).name,
-        tree_a=tree_a,
-        tree_b=tree_b,
-        stl_base_url=stl_base_url,
-        lang=lang,
-    )
-    Path(args.output).write_text(html_report, encoding="utf-8")
+        html_report = render_report(
+            diff,
+            Path(args.file_a).name,
+            Path(args.file_b).name,
+            tree_a=tree_a,
+            tree_b=tree_b,
+            stl_base_url=stl_base_url,
+            lang=lang,
+        )
+        Path(args.output).write_text(html_report, encoding="utf-8")
+    except RuntimeError as exc:
+        status(f"{tr(lang, 'read_error_prefix')}: {exc}")
+        return 1
+    except OSError as exc:
+        status(f"{tr(lang, 'internal_error_prefix')}: {exc}")
+        return 1
+
     status(f"{tr(lang, 'cli_saved')} {args.output}")
 
     if args.json:
         import json
         print(json.dumps(diff.to_dict(), indent=2, ensure_ascii=False))
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

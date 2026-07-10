@@ -81,7 +81,12 @@ def test_nodes_have_unique_path_ids(box_cylinder_step):
 
 def test_path_id_encoding_roundtrip():
     """Encoded path ids should round-trip for URL-safe asset routes."""
-    originals = ["/TestAssembly/Box1", "/TestAssembly/Box #2"]
+    originals = [
+        "/TestAssembly/Box1",
+        "/TestAssembly/Box #2",
+        "/TestAssembly/part_with_underscore",
+        "/TestAssembly/foo/bar",
+    ]
     for original in originals:
         encoded = encode_path_id(original)
         assert decode_path_id(encoded) == original

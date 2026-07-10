@@ -75,8 +75,9 @@ Last updated: 2026-07-10
 ## 7) Checker Plan (Maker != Checker)
 
 - Maker agent: implementation and docs.
-- Checker agent(s): pytest, smoke `wsgi.py`, manual preview click-through.
-- External review: optional PR review tooling.
+- Checker agent(s): independent human or agent review is required before acceptance.
+- Automated checks: pytest, smoke `wsgi.py`, manual preview click-through.
+- External review tooling (for example PR review bots): optional and does not replace the required independent review.
 
 ## 8) Result Summary
 

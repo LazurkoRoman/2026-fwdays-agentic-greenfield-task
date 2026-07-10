@@ -38,7 +38,7 @@ Last updated: 2026-07-10
 
 Verification snapshot command:
 
-- `\.venv\Scripts\python.exe -m pytest -q` -> `30 passed, 6 warnings` (2026-07-10)
+- `.venv\Scripts\python.exe -m pytest tests/ -v`
 
 ## Dependencies
 

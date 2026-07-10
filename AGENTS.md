@@ -28,9 +28,15 @@ Critical detail every agent MUST know before changing `step_tree.py`: volume and
 
 For each small increment, follow the same loop:
 
-1. context -> 2) requirements -> 3) specification -> 4) small work slice ->
-
-5) tests -> 6) implementation -> 7) verification -> 8) separate review -> 9) summary.
+1. context
+2. requirements
+3. specification
+4. small work slice
+5. tests
+6. implementation
+7. verification
+8. separate review
+9. summary
 
 This is NOT a single large prompt. It is a sequence of small controlled iterations.
 
